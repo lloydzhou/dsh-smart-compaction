@@ -18,6 +18,8 @@ import ToolsService from '@deepseek-ai/dsh-tools';
 import CacheFirstPlugin, * as CacheFirst from '../src/index.js';
 import { BasicCompactionEngine } from '@deepseek-ai/dsh-compaction-basic';
 import type { PolicyObservation } from '../src/index.js';
+import { diagnosticProjection, type DiagnosticState } from '../src/diagnostics.js';
+import { matchDiagnostic } from '../client/model.js';
 
 // The actual published services and actual source plugins are loaded by Loader;
 // only the external model boundary is deterministic. No compaction methods or
@@ -136,7 +138,7 @@ function seedHistory(agent: Agent, oldText = 'older context '.repeat(250)) {
 
 function assertSummaryTransaction(session: Session, eventCountBefore: number) {
   const suffix = session.snapshotEvents().slice(eventCountBefore);
-  expect(suffix.map(event => event.type)).toEqual(['compaction/start', 'compaction/summary', 'user/message', 'compaction/end']);
+  expect(suffix.map(event => event.type)).toEqual(['compaction/start', 'compaction/summary', 'user/message', 'compaction/end', 'plugin:smart-compaction/diagnostic']);
   const start = suffix[0]!;
   const summary = suffix[1]!;
   const replacement = suffix[2]!;
@@ -144,6 +146,12 @@ function assertSummaryTransaction(session: Session, eventCountBefore: number) {
   if (start.type !== 'compaction/start' || summary.type !== 'compaction/summary' || end.type !== 'compaction/end') throw new Error('Missing durable transaction');
   expect(summary.data.compactionId).toBe(start.data.compactionId);
   expect(end.data.compactionId).toBe(start.data.compactionId);
+  const state = session.snapshotEvents().reduce<DiagnosticState>((state, event) => diagnosticProjection.apply(state, event), { schemaVersion: 1 as const, sessionId: String(session.id), records: [] });
+  const diagnostic = matchDiagnostic(state, String(session.id), Number(summary.seq));
+  expect(diagnostic).toBeDefined();
+  expect(diagnostic?.summaryAttempts).toBe(1);
+  expect(diagnostic?.llmStreamCalls).toBe(1);
+  expect(diagnostic?.usage.cacheHitRatio).toBeNull();
   expect(summary.data.llmStreamCall).toBe(true);
   expect(summary.data.rawOutput).toBeDefined();
   expect(replacement.surfaceOp).toEqual({ op: 'replace', startSeq: summary.data.shadowedRange.start, endSeq: summary.data.shadowedRange.end });
@@ -167,7 +175,7 @@ describe('published Loader + Include composition with external source plugins', 
     expect(session.surface.nodes).not.toContain(originalEvent.seq);
     expect(session.surface.nodes).toContain(tail.seq);
     expect(session.eventAt(originalEvent.seq)).toEqual(originalEvent);
-    expect(session.snapshotEvents().slice(eventCount).map(event => event.type)).toEqual(['compaction/prune', 'tool/result']);
+    expect(session.snapshotEvents().slice(eventCount).map(event => event.type)).toEqual(['compaction/prune', 'tool/result', 'plugin:smart-compaction/diagnostic']);
   });
 
   it('passes original tool bytes to the real Basic summarizer when pruning is insufficient', async () => {
@@ -229,7 +237,8 @@ describe('published Loader + Include composition with external source plugins', 
     const entry = [...ctx.loader.entries()].find(entry => entry.options.name === CACHE)!;
     await ctx.compaction.compactIfNeeded(agent, 'pressure', signal());
     expect(observations).toHaveLength(1);
-    expect(observations[0]).toMatchObject({ mode: 'observe', status: 'missing-prices', decisionApplied: false });
+    expect(observations[0]).toMatchObject({ mode: 'observe', decisionApplied: false });
+    expect(observations[0]?.status).not.toBe('missing-prices');
     await entry.fiber!.dispose();
     expect(ctx.get('compaction')).toBeUndefined();
     // A frozen snapshot from the unit fixture verifies no dangling observer.

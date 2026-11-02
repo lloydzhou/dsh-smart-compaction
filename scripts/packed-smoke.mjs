@@ -1,6 +1,7 @@
 // Copy this script into a clean npm installation; it imports only installed exports.
 import assert from 'node:assert/strict';
-import { realpath } from 'node:fs/promises';
+import { readFile, realpath } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { Context } from '@deepseek-ai/cordis';
 import Loader from '@deepseek-ai/cordis-plugin-loader';
@@ -16,6 +17,23 @@ import 'dsh-smart-compaction/policy';
 const installed = fileURLToPath(import.meta.resolve('dsh-smart-compaction'));
 assert.equal(await realpath(installed), installed, 'packed entry must not be a workspace symlink');
 assert(installed.startsWith(process.cwd() + '/node_modules/'));
+const expectedDsh = process.env.EXPECT_DSH_VERSION;
+assert(['0.2.1-rc.3', '0.2.1-rc.5'].includes(expectedDsh), 'set EXPECT_DSH_VERSION to the exact host release');
+const lock = JSON.parse(await readFile('package-lock.json', 'utf8'));
+const dshPackages = Object.entries(lock.packages).filter(([path]) => /(?:^|\/)node_modules\/@deepseek-ai\/dsh-[^/]+$/.test(path));
+assert(dshPackages.length > 0);
+for (const [path, info] of dshPackages) {
+  assert.equal(info.version, expectedDsh, `${path} must use the host release, not a hidden newer backend`);
+  assert(path.startsWith('node_modules/@deepseek-ai/dsh-'), `${path} must be deduplicated`);
+}
+const hostRequire = createRequire(import.meta.url);
+const pluginRequire = createRequire(installed);
+const manifest = JSON.parse(await readFile(hostRequire.resolve('dsh-smart-compaction/package.json'), 'utf8'));
+assert.equal(manifest.version, '0.2.1-rc.1');
+for (const name of Object.keys(manifest.dependencies)) {
+  assert.equal(await realpath(pluginRequire.resolve(name)), await realpath(hostRequire.resolve(name)), `${name} must share the host runtime module`);
+}
+console.log(`PASS host ${expectedDsh}: ${dshPackages.length} DSH packages, no nested copies, shared runtime modules`);
 assert.equal(Config({}).adaptive.mode, 'observe');
 const snapshot = {
   totalTokens: 1000, surfaceTokens: 900, fixedTokens: 100,
@@ -24,7 +42,12 @@ const snapshot = {
   summaryRoute: { provider: 'smoke', model: 'test' }, history: { userTurns: 2, modelCalls: 1, compactionCount: 0 },
   candidates: [{ start: SessionSeq(1), end: SessionSeq(2), removedTokens: 700, retainedTokens: 200 }],
 };
-assert.equal(evaluatePolicy(snapshot).status, 'missing-prices');
+assert.equal(evaluatePolicy(snapshot, { referencePriceFallback: false }).status, 'missing-prices');
+assert.equal(evaluatePolicy(snapshot).pricing.main.source, 'reference-fallback');
+assert.equal(evaluatePolicy(snapshot).pricing.main.currency, 'USD');
+const client = await readFile(hostRequire.resolve('dsh-smart-compaction/client'), 'utf8');
+assert(client.includes('__ModuleLoader__'));
+assert(client.includes('dsh-smart-compaction'));
 for (const [config, native, mode] of [
   [undefined, false, 'observe'],
   [{ cacheFirst: true, adaptive: { mode: 'off' } }, false, 'off'],
@@ -50,7 +73,7 @@ for (const [config, native, mode] of [
     if (native) assert.equal(Object.getPrototypeOf(ctx.compaction), BasicCompactionEngine.prototype);
     assert.equal([...ctx.loader.entries()].filter(e => e.options.name === 'dsh-smart-compaction').length, 1);
     const baseline = { thresholdTokens: 16000, retainTokens: 100, reason: 'smoke' };
-    assert.equal(ctx.waterfall('cache-first/decide', snapshot, () => baseline), baseline);
+    assert.equal(ctx.waterfall('cache-first/decide', snapshot, () => baseline), mode === 'active' ? null : baseline);
     assert.equal(logs.length, mode === 'off' ? 0 : 1);
     await entry.fiber.dispose();
     assert.equal(ctx.get('compaction'), undefined);

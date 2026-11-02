@@ -10,38 +10,39 @@ interface PresetRow extends EntryOptions {
 async function bundle() {
   return load(await readFile(new URL('../cordis.patch.yml', import.meta.url), 'utf8'), { schema: entryListSchema }) as Array<{ insert: PresetRow[] }>;
 }
-function flatten(rows: EntryOptions[]): EntryOptions[] {
-  return rows.flatMap(row => [row, ...(row.group && Array.isArray(row.config) ? flatten(row.config as EntryOptions[]) : [])]);
-}
-
-describe('single additive bundle', () => {
-  it.each(['standard', 'custom', 'minimal', 'operator-edited'])('leaves existing %s preset unchanged', async id => {
-    const stock: EntryOptions = { id: `preset-${id}`, name: '@deepseek-ai/dsh-agent-preset', config: { id, plugins: [{ id: 'user-tool', name: 'my-custom-tool' }] } };
+describe('standard integration bundle', () => {
+  it('disables only native registration and inserts startup plumbing plus discoverable marker', async () => {
+    const stock: EntryOptions = { id: 'preset-standard', name: '@deepseek-ai/dsh-agent-preset', config: { id: 'standard', plugins: [{ id: 'user-tool', name: 'my-custom-tool' }] } };
+    const custom: EntryOptions = { id: 'preset-custom', name: '@deepseek-ai/dsh-agent-preset', config: { id: 'custom', plugins: [] } };
+    const before = structuredClone(stock);
     const warnings: string[] = [];
-    const rows = applyEntryPatches([stock], await bundle(), message => warnings.push(message));
+    const rows = applyEntryPatches([stock, custom], await bundle(), message => warnings.push(message));
     expect(warnings).toEqual([]);
-    expect(rows).toHaveLength(2);
-    expect(rows[0]).toEqual(stock);
-    const row = rows[1] as PresetRow;
-    const plugins = flatten(row.config.plugins);
-    const providers = plugins.filter(item => item.name === 'dsh-smart-compaction');
-    expect(providers).toHaveLength(1);
-    expect(providers[0]!.config).toEqual({ cacheFirst: true, adaptive: { mode: 'observe' } });
-    expect(plugins.some(item => item.name === '@deepseek-ai/dsh-compaction-basic')).toBe(false);
-    expect(plugins.filter(item => item.name === '@deepseek-ai/dsh-command-compact')).toHaveLength(1);
-    expect(plugins.filter(item => item.name === '@deepseek-ai/dsh-compaction-tool-result-pruner')).toHaveLength(1);
-    expect(row.config.plugins.find(item => item.id === 'compaction')).toMatchObject({ group: true, isolate: { compaction: true, toolResultPruner: true } });
+    expect(rows).toHaveLength(4);
+    expect(rows[0]).toEqual({ ...before, disabled: true });
+    expect(rows[1]).toEqual(custom);
+    expect(rows[2]).toEqual({ id: 'smart-compaction-preset-adapter', name: 'dsh-smart-compaction/preset' });
+    expect(rows[3]).toEqual({ id: 'smart-compaction-integration', name: 'dsh-smart-compaction', config: { integration: true } });
+    // Without this bundle's patch there is no disabled override or adapter/marker.
+    expect(applyEntryPatches([stock, custom], [], message => warnings.push(message))).toEqual([before, custom]);
   });
 
-  it('root manifest is the only publishable project with exact runtime compatibility', async () => {
+  it('root manifest declares a minimum host API and compatible dependency ranges', async () => {
     const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
     expect(manifest.name).toBe('dsh-smart-compaction');
     expect(manifest.private).toBeUndefined();
     expect(manifest.workspaces).toBeUndefined();
-    expect(manifest.engines.dsh).toBe('0.2.1-rc.5');
+    const supported = '^0.2.1-rc.3';
+    expect(manifest.version).toBe('0.2.1-rc.1');
+    expect(manifest.engines.dsh).toBe('>=0.2.1-rc.3');
+    for (const section of ['dependencies', 'devDependencies']) {
+      for (const [name, range] of Object.entries(manifest[section])) {
+        if (name.startsWith('@deepseek-ai/dsh-')) expect(range, name).toBe(supported);
+      }
+    }
     expect(manifest.dsh.bundle.patch).toBe('./cordis.patch.yml');
     expect(manifest.files).toContain('cordis.patch.yml');
     expect(JSON.stringify(manifest)).not.toContain('workspace:');
-    expect(Object.keys(manifest.dependencies).every(name => name.startsWith('@deepseek-ai/'))).toBe(true);
+    expect(Object.keys(manifest.dependencies).every(name => name.startsWith('@deepseek-ai/') || name === 'zod')).toBe(true);
   });
 });

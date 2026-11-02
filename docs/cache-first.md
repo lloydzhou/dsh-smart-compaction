@@ -1,6 +1,6 @@
 # dsh-smart-compaction
 
-A session-scoped compaction provider for **DSH 0.2.1-rc.5**, tested with Cordis 4.0.5. It extends the published `BasicCompactionEngine`; no private DSH imports or checkout aliases are used. It is not compatible by declaration with the installed GUI's older 0.2.1-rc.3 runtime.
+A session-scoped compaction provider for **DSH 0.2.1-rc.3 and 0.2.1-rc.5**, tested with Cordis 4.0.5. It extends the published `BasicCompactionEngine`; no private DSH imports or checkout aliases are used. Both exact releases pass build, typecheck, all 65 tests and isolated packed-host activation. The engine gate admits only those two tested releases; live GUI end-to-end behavior is not tested.
 
 ## Behavior
 

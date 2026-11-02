@@ -1,6 +1,6 @@
 # Implementation scope
 
-One root npm project, `dsh-smart-compaction`, targets the published DSH 0.2.1-rc.5 API (original alpha source research: ce7073d51254c26cd63b22a60835b8f948deb447; runtime now validated against RC.5 npm packages). Runtime DSH prerelease dependencies remain exact; Cordis is 4.0.5 and Schemastery is 3.18.5. No private source imports, workspace package dependencies, or host checkout changes. The installed GUI 0.2.1-rc.3 is not upgraded or claimed compatible.
+One root npm project, `dsh-smart-compaction` 0.2.1-rc.1, supports published DSH 0.2.1-rc.3 and 0.2.1-rc.5 APIs (original alpha source research: ce7073d51254c26cd63b22a60835b8f948deb447). Assuming backward-compatible public core APIs, DSH dependencies use `^0.2.1-rc.3` and the host gate uses `>=0.2.1-rc.3`; tested releases are evidence, not an install whitelist. Standard semver prerelease matching still applies. The lockfile retains RC.5; isolated exact RC.3 tests and packed host installs verify RC.3 without a hidden RC.5 backend. Cordis is 4.0.5 and Schemastery is 3.18.5. No private source imports, workspace package dependencies, or host checkout changes. The installed GUI is not modified; package-level compatibility is not a claim of live GUI end-to-end validation.
 
 ## Composition
 

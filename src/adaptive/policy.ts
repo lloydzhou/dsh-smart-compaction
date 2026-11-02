@@ -12,6 +12,8 @@ export const inject = ['compaction'];
 
 export interface PolicyObservation {
   event: 'adaptive-compaction/decision';
+  sessionId?: string;
+  operationId?: string;
   mode: 'observe' | 'active';
   route: CacheFirstSnapshot['route'];
   summaryRoute: CacheFirstSnapshot['summaryRoute'];
@@ -20,6 +22,7 @@ export interface PolicyObservation {
   totalTokens: number;
   evaluatedCandidates: number;
   availableCandidates: number;
+  pricing: Evaluation['pricing'];
   baselineCost: number | null;
   estimatedCost: number | null;
   predictedNetBenefit: number | null;
@@ -59,8 +62,10 @@ export function apply(ctx: Context, input: AdaptiveConfig = {}): void {
     const applied = config.mode === 'active' && usable;
     const observation: PolicyObservation = {
       event: 'adaptive-compaction/decision', mode: config.mode,
+      ...(snapshot.sessionId === undefined ? {} : { sessionId: snapshot.sessionId }),
+      ...(snapshot.operationId === undefined ? {} : { operationId: snapshot.operationId }),
       route: snapshot.route, summaryRoute: snapshot.summaryRoute, trigger: snapshot.trigger,
-      status: evaluation.status, totalTokens: snapshot.totalTokens,
+      status: evaluation.status, totalTokens: snapshot.totalTokens, pricing: evaluation.pricing,
       evaluatedCandidates: evaluation.evaluatedCandidates, availableCandidates: evaluation.availableCandidates,
       baselineCost: evaluation.baselineCost, estimatedCost: evaluation.best?.totalCost ?? null,
       predictedNetBenefit: evaluation.best?.predictedNetBenefit ?? null,

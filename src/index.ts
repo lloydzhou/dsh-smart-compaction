@@ -1,13 +1,17 @@
 /** One session-scoped plugin; execution and economic policy remain independent internally. */
 import { Context } from '@deepseek-ai/cordis';
+import { Config as IntegrationSchema, type IntegrationConfig } from './preset.js';
 import z from '@deepseek-ai/schemastery';
 import { BasicCompactionEngine } from '@deepseek-ai/dsh-compaction-basic';
 import { CacheFirstCompactionEngine, type CacheFirstConfig } from './engine.js';
 import { Config as AdaptiveSchema, resolveConfig as resolveAdaptiveConfig, type AdaptiveConfig, type ResolvedConfig as ResolvedAdaptiveConfig } from './adaptive/config.js';
+import { registerDiagnostics } from './diagnostics.js';
 import { apply as applyPolicy } from './adaptive/policy.js';
 
 export { CacheFirstCompactionEngine } from './engine.js';
 export type { CacheFirstConfig } from './engine.js';
+export type { CompactionResultSink, CompactionTelemetryResult, DecisionFact } from './telemetry.js';
+export type { DiagnosticRecord, DiagnosticState } from './diagnostics.js';
 export type * from './policy.js';
 export { evaluatePolicy } from './adaptive/economics.js';
 export type { CandidateScore, Evaluation } from './adaptive/economics.js';
@@ -44,8 +48,10 @@ export function resolveConfig(input: PluginConfig = {}): ResolvedPluginConfig {
 }
 
 export const name = 'smart-compaction';
-export const inject = BasicCompactionEngine.inject;
-export const Config: z<PluginConfig> = z.transform(z.object({
+// Dependencies belong to the selected branch: integration must not wait for or
+// provide a global compaction engine. The session branch retains its native injection.
+export const inject: string[] = [];
+export const EngineConfig: z<PluginConfig> = z.transform(z.object({
   cacheFirst: z.boolean().default(true),
   adaptive: AdaptiveSchema,
   base: BasicCompactionEngine.Config,
@@ -53,20 +59,35 @@ export const Config: z<PluginConfig> = z.transform(z.object({
   maxCandidateChecks: z.number().step(1).min(2).default(128),
 }), value => resolveConfig(value as PluginConfig));
 
-/** Root injection waits for Basic's services. Backend and observer share this fiber,
- * so readiness and disposal are atomic; no child requiring its parent's pending service.
- */
-export function apply(ctx: Context, input: PluginConfig = {}): void {
+// This root carries only integration flags or engine settings, not child entries.
+// Leave native Loader expression evaluation enabled; the preset adapter reads
+// deferred child declarations separately through the public profile loader.
+export const Config = z.union([IntegrationSchema, EngineConfig]);
+
+/** Dispatch before mounting services. Child plugin lifetime is owned by the root. */
+export function apply(ctx: Context, input: PluginConfig | IntegrationConfig = {}): void {
+  if ('integration' in input) {
+    if (input.integration !== true || Object.keys(input).some(key => key !== 'integration')) throw new TypeError('integration accepts only { integration: true }');
+    // Enable/client-discovery marker only. The bundle's separate startup adapter
+    // owns standard + legacy alias registration even when this row is disabled.
+  } else {
+    const config = EngineConfig(input);
+    ctx.plugin({ name: 'smart-compaction-engine', inject: [...BasicCompactionEngine.inject, 'sessionProjections'], apply: applyEngine }, config);
+  }
+}
+
+function applyEngine(ctx: Context, input: PluginConfig): void {
   const config = resolveConfig(input);
   if (!config.cacheFirst) {
     new BasicCompactionEngine(ctx, config.base);
     return;
   }
+  const diagnosticSink = registerDiagnostics(ctx);
   new CacheFirstCompactionEngine(ctx, {
     ...(config.base === undefined ? {} : { base: config.base }),
     summaryFallbackAttempts: config.summaryFallbackAttempts,
     maxCandidateChecks: config.maxCandidateChecks,
-  });
+  }, diagnosticSink);
   if (config.adaptive.mode !== 'off') applyPolicy(ctx, config.adaptive);
 }
 

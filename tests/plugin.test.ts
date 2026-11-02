@@ -45,6 +45,15 @@ describe('policy-only middleware', () => {
     })] }));
     expect(next.mock.invocationCallOrder[0]).toBeLessThan(exportLog.mock.invocationCallOrder.at(-1)!);
   });
+  it('correlates predictions with the backend operation and session', () => {
+    const ctx = new Context(); const exportLog = vi.fn();
+    ctx.logger.exporter({ export: exportLog });
+    apply(ctx, { prices });
+    ctx.waterfall('cache-first/decide', { ...snapshot, sessionId: 'session', operationId: 'operation' }, () => baseline);
+    expect(exportLog).toHaveBeenCalledWith(expect.objectContaining({ args: [expect.objectContaining({
+      event: 'adaptive-compaction/decision', sessionId: 'session', operationId: 'operation',
+    })] }));
+  });
   it('off preserves the next result without pricing', () => {
     const ctx = new Context();
     apply(ctx, { mode: 'off' });

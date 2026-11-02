@@ -5,10 +5,12 @@ import { evaluatePolicy } from '../src/adaptive/economics.js';
 
 
 describe('validated operator assumptions', () => {
-  it('defaults to observe with no invented price table', () => {
+  it('defaults to observe with labeled reference pricing and supports opt-out', () => {
     expect(resolveConfig().mode).toBe('observe');
     expect(Config({}).prices).toEqual([]);
-    expect(evaluatePolicy(snapshot).status).toBe('missing-prices');
+    expect(Config({}).referencePriceFallback).toBe(true);
+    expect(evaluatePolicy(snapshot).status).toBe('compact');
+    expect(evaluatePolicy(snapshot, { referencePriceFallback: false }).status).toBe('missing-prices');
   });
   it.each([NaN, Infinity, -1])('rejects invalid price %s', value => {
     expect(() => resolveConfig({ prices: [{ ...prices[0]!, input: value }] })).toThrow();
@@ -69,8 +71,8 @@ describe('finite-horizon legal candidate economics', () => {
     expect(result.status).toBe('defer');
   });
   it('requires prices for the actual summary route and never matches partial routes', () => {
-    expect(evaluatePolicy(snapshot, { prices: [prices[0]!] }).status).toBe('missing-prices');
-    expect(evaluatePolicy({ ...snapshot, route: { provider: 'other', model: 'main' } }, { prices }).status).toBe('missing-prices');
+    expect(evaluatePolicy(snapshot, { prices: [prices[0]!], referencePriceFallback: false }).status).toBe('missing-prices');
+    expect(evaluatePolicy({ ...snapshot, route: { provider: 'other', model: 'main' } }, { prices, referencePriceFallback: false }).status).toBe('missing-prices');
   });
   it('honors retention, pressure, budget and bounded candidate scanning', () => {
     expect(evaluatePolicy(snapshot, { prices, minRetainTokens: 50_000 }).status).toBe('no-candidate');

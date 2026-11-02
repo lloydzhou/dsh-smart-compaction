@@ -18,6 +18,9 @@ export interface CacheFirstRoute {
 
 /** Numeric, detached snapshot. History counts include shadowed and inherited events. */
 export interface CacheFirstSnapshot {
+  /** Execution correlation when supplied by the cache-first backend. */
+  readonly sessionId?: string;
+  readonly operationId?: string;
   readonly totalTokens: number;
   readonly surfaceTokens: number;
   readonly fixedTokens: number;

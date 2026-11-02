@@ -12,7 +12,12 @@ export interface RoutePrices {
 }
 export interface AdaptiveConfig {
   mode?: 'off' | 'observe' | 'active';
+  /** Compatibility override: exact routes, not public runtime model metadata. */
   prices?: RoutePrices[];
+  /** Use the pinned DeepSeek reference for routes without explicit prices. */
+  referencePriceFallback?: boolean;
+  /** Currency of all legacy entries; unspecified cannot mix with the USD reference. */
+  legacyPriceCurrency?: string;
   expectedRemainingCalls?: number;
   expectedOutputTokensPerCall?: number;
   cacheHitRatio?: number;
@@ -35,7 +40,7 @@ export interface AdaptiveConfig {
 }
 export type ResolvedConfig = Required<AdaptiveConfig>;
 const defaults: ResolvedConfig = {
-  mode: 'observe', prices: [], expectedRemainingCalls: 8,
+  mode: 'observe', prices: [], referencePriceFallback: true, legacyPriceCurrency: 'unspecified', expectedRemainingCalls: 8,
   expectedOutputTokensPerCall: 0, cacheHitRatio: 0, rebuildCacheHitRatio: 0,
   cacheWriteFraction: 0, summaryInputOverheadTokens: 1024,
   expectedSummaryTokens: 2048, summaryFramingTokens: 64, summaryCacheHitRatio: 0,
@@ -53,6 +58,8 @@ export function resolveConfig(input: AdaptiveConfig = {}): ResolvedConfig {
   for (const key of Object.keys(input)) if (!Object.hasOwn(defaults, key)) throw new TypeError(`Unknown option: ${key}`);
   const c = { ...defaults, ...input };
   if (!['off', 'observe', 'active'].includes(c.mode)) throw new TypeError('Invalid mode');
+  if (typeof c.referencePriceFallback !== 'boolean') throw new TypeError('referencePriceFallback must be boolean');
+  if (typeof c.legacyPriceCurrency !== 'string' || !/^(unspecified|[A-Z]{3})$/.test(c.legacyPriceCurrency)) throw new TypeError('legacyPriceCurrency must be unspecified or an uppercase three-letter currency code');
   for (const key of ['cacheHitRatio', 'rebuildCacheHitRatio', 'cacheWriteFraction', 'summaryCacheHitRatio', 'minPressureRatio', 'maxRetainRatio'] as const) finite(c[key], key, 0, 1);
   for (const key of ['expectedOutputTokensPerCall', 'summaryInputOverheadTokens', 'expectedSummaryTokens', 'summaryFramingTokens', 'minRetainTokens', 'minNetBenefit', 'informationLossPerMillionTokens'] as const) finite(c[key], key);
   finite(c.expectedRemainingCalls, 'expectedRemainingCalls', 1, 1000);
@@ -79,6 +86,8 @@ const ratio = (value: number) => z.number().min(0).max(1).default(value);
 /** Loader/UI schema plus the same strict runtime checks as direct installation. */
 export const Config = z.transform(z.object({
   mode: z.union(['off', 'observe', 'active']).default('observe'),
+  referencePriceFallback: z.boolean().default(true),
+  legacyPriceCurrency: z.string().default('unspecified'),
   prices: z.array(z.object({ provider: z.string().required(), model: z.string().required(), input: rate(), output: rate(), cacheRead: rate(), cacheWrite: rate() })).default([]),
   expectedRemainingCalls: z.natural().min(1).max(1000).default(8),
   expectedOutputTokensPerCall: z.natural().default(0),

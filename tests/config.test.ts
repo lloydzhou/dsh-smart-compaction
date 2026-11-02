@@ -11,11 +11,24 @@ describe('single plugin configuration matrix', () => {
     expect(resolveConfig()).toMatchObject({ cacheFirst: true, adaptive: { mode: 'observe' }, summaryFallbackAttempts: 2, maxCandidateChecks: 128 });
     expect(Config({})).toMatchObject({ cacheFirst: true, adaptive: { mode: 'observe' } });
     expect(plugin.apply).toBe(apply);
-    expect(plugin.inject).toEqual(BasicCompactionEngine.inject);
+    expect(plugin.inject).toEqual([]);
+    expect(Config({ integration: true })).toEqual({ integration: true });
+  });
+  it('root integration is only a marker and mounts no services or child plugins', async () => {
+    const ctx = new Context(); contexts.push(ctx);
+    const fiber = ctx.plugin(plugin, { integration: true });
+    await fiber;
+    expect(ctx.get('compaction')).toBeUndefined();
+    expect(ctx.get('smartCompactionPreset')).toBeUndefined();
+    expect(ctx.get('agentPresets')).toBeUndefined();
   });
   it.each(['off', 'observe', 'active'] as const)('accepts cache-first/%s', mode => {
     expect(resolveConfig({ cacheFirst: true, adaptive: { mode } }).adaptive.mode).toBe(mode);
-    expect(Config({ cacheFirst: true, adaptive: { mode } }).adaptive?.mode).toBe(mode);
+    expect(Config({ cacheFirst: true, adaptive: { mode } })).toMatchObject({ adaptive: { mode } });
+  });
+  it('rejects mixed integration and engine options in schema and direct calls', () => {
+    expect(() => Config({ integration: true, cacheFirst: true })).toThrow();
+    expect(() => Config({ integration: false } as never)).toThrow();
   });
   it('accepts native/off', () => {
     expect(Config({ cacheFirst: false, adaptive: { mode: 'off' } })).toMatchObject({ cacheFirst: false, adaptive: { mode: 'off' } });

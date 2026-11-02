@@ -1,5 +1,9 @@
 import type { CacheFirstCandidate, CacheFirstDecisionResult, CacheFirstSnapshot } from '../policy.js';
-import { resolveConfig, type AdaptiveConfig, type ResolvedConfig, type RoutePrices } from './config.js';
+import { resolveConfig, type AdaptiveConfig, type RoutePrices } from './config.js';
+import { resolveRoutePricing, type ResolvedRoutePricing } from './pricing.js';
+
+export { DEEPSEEK_REFERENCE, resolveRoutePrice, resolveRoutePricing } from './pricing.js';
+export type { RoutePriceFact, ResolvedRoutePricing } from './pricing.js';
 
 export interface CandidateScore {
   candidate: CacheFirstCandidate;
@@ -20,10 +24,11 @@ export interface Evaluation {
   evaluatedCandidates: number;
   availableCandidates: number;
   best: CandidateScore | null;
+  pricing: ResolvedRoutePricing;
 }
 const MILLION = 1_000_000;
 /** cacheWrite is an additive fee on the fraction of uncached tokens written. */
-function inputCost(tokens: number, price: RoutePrices, hit: number, write: number): number {
+function inputCost(tokens: number, price: Pick<RoutePrices, 'input' | 'output' | 'cacheRead' | 'cacheWrite'>, hit: number, write: number): number {
   return tokens * (hit * price.cacheRead + (1 - hit) * (price.input + write * price.cacheWrite)) / MILLION;
 }
 const validNumber = (x: number) => Number.isFinite(x) && x >= 0 && x <= Number.MAX_SAFE_INTEGER;
@@ -31,18 +36,16 @@ function validSnapshot(s: CacheFirstSnapshot): boolean {
   return [s.totalTokens, s.surfaceTokens, s.fixedTokens, s.thresholdTokens, s.defaultRetainTokens, s.summaryMaxTokens].every(validNumber)
     && validNumber(s.contextWindow) && s.contextWindow > 0 && s.totalTokens >= s.fixedTokens;
 }
-function pricesFor(c: ResolvedConfig, route: CacheFirstSnapshot['route']): RoutePrices | undefined {
-  return c.prices.find(p => p.provider === route.provider && p.model === route.model);
-}
 /** Pure, finite-horizon estimate. It does not predict cache hits or measure quality. */
 export function evaluatePolicy(snapshot: CacheFirstSnapshot, config: AdaptiveConfig = {}): Evaluation {
   const c = resolveConfig(config);
-  const result: Evaluation = { status: 'off', decision: null, baselineCost: null, evaluatedCandidates: 0, availableCandidates: snapshot.candidates.length, best: null };
+  const pricing = resolveRoutePricing(snapshot.route, snapshot.summaryRoute, c);
+  const result: Evaluation = { status: 'off', decision: null, baselineCost: null, evaluatedCandidates: 0, availableCandidates: snapshot.candidates.length, best: null, pricing };
   if (c.mode === 'off') return result;
   if (!validSnapshot(snapshot)) return { ...result, status: 'invalid-snapshot' };
-  const price = pricesFor(c, snapshot.route);
-  const summaryPrice = pricesFor(c, snapshot.summaryRoute);
-  if (!price || !summaryPrice) return { ...result, status: 'missing-prices' };
+  const price = pricing.main.rates;
+  const summaryPrice = pricing.summary.rates;
+  if (!pricing.compatible || !price || !summaryPrice) return { ...result, status: 'missing-prices' };
   const decisionThreshold = Math.max(1, Math.min(snapshot.thresholdTokens, snapshot.totalTokens - 1));
   const summaryTokens = Math.min(c.expectedSummaryTokens, snapshot.summaryMaxTokens);
   const replacementTokens = summaryTokens + c.summaryFramingTokens;
