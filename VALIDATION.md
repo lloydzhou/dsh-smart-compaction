@@ -72,4 +72,11 @@
 - 诊断为实验性ignorable记录，不进入模型上下文；投影保留最近64次有意义操作，旧记录无诊断正常降级。
 - 依赖联网审计报告24个high项；离线install的零漏洞不是安全证明。
 
-最新修复已重新打包：52,297 bytes，SHA1 `aa3e1efcb46f9aa22350551d08eb4a5e3adf1937`。此前47,263-byte/SHA1 6bad139a987ef2ce4886af5c0591f70ddd21fd18是修复前产物，已被替代。
+发布整理重新执行npm pack并核对入口、client产物及无临时认证/协作文件。此前52,297-byte/SHA1 aa3e1efcb46f9aa22350551d08eb4a5e3adf1937以及47,263-byte产物均已过时，不能作为当前版本校验值；当前归档摘要以最终pack结果为准。
+
+## 发布前警告分类
+
+- 本地pnpm link的peer提醒为通用解析提醒；实际app.asar宿主解析器再次验证Session/helper同一身份且真实sink记录1条。保留必要peers，不添加豁免或伪装普通依赖来消除提示。
+- Desktop RC.5使用web-app模板，客户端模块发现只接受platform:web；此配置也服务Desktop，不应移除。
+- 用户提供的Desktop其余具体冲突属于已有browser/computer-use、实验驱动、Claude Code/Codex子代理和usage-stats旧版本。用户选择只整理本项目，未修改其他插件配置。
+- 最终npm发布由用户执行，本次只提交推送；建议使用next tag并确认版本未被占用。

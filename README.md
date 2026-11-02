@@ -4,6 +4,34 @@
 
 插件版本跟随 DSH 的三段版本线（当前 `0.2.1`），使用独立递增的 RC 序号（当前 `0.2.1-rc.1`）。插件的 RC 序号不是宿主最低版本；宿主兼容范围由 `engines.dsh` 单独声明。
 
+## 安装、Desktop 与本地链接警告
+
+发布后按目标 profile 安装同一个包：
+
+```sh
+dsh plugin --profile web add dsh-smart-compaction@0.2.1-rc.1
+dsh plugin --profile desktop add dsh-smart-compaction@0.2.1-rc.1
+```
+
+`dsh.client.platform: "web"` 表示 HTML/React 客户端平台，不是名为 web 的配置 profile。RC.5 Desktop 使用相同的 web-app 模板和客户端模块发现机制，因此也需要此声明。`client.inject` 声明宿主提供的 UI/locale 服务依赖，`exports["./client"]` 提供构建后的客户端入口；它们用于增强压缩展示，不是另一套压缩引擎。Desktop 实际界面启停尚未单独端到端验收。
+
+本地 `dsh plugin --profile web add .` 使用 pnpm link，可能提示链接包不会按普通规则从目标 node_modules 解析 peers。这是链接模式的通用提醒，不等于 DSH 实际解析失败。本插件必须把宿主运行时库保留为 peerDependencies，避免重复 Session 类和服务身份。实际安装宿主的公开解析器已验证共享身份及诊断写入。不要为消除警告改回普通 dependencies，也不要据此手工修改 profile 的依赖结构。
+
+安装操作可能同时报告该 profile 已有插件的版本冲突。按警告中的包名处理：旧 browser/computer-use、子代理或 usage-stats 的精确版本/范围冲突不属于本插件。优先升级或禁用不兼容插件；不建议直接授予版本豁免。笼统的 peer 警告需展开依赖报告才能定位。
+
+## 发布准备
+
+```sh
+npm ci
+npm run typecheck
+npm test
+npm pack --dry-run
+# 确认版本未占用后，由维护者执行：
+npm publish --tag next --access public
+```
+
+预发布版本使用 `next`，不要无意更新 `latest`。`prepack` 会构建后端和客户端；发布产物包含 `lib`、`client/dist`、bundle patch 与说明文档，不包含本地协作笔记或认证文件。若同版本已发布，先递增版本，npm 不允许覆盖版本。
+
 ## 如何确认插件正在工作
 
 1. 插件页面显示 `agent-preset / Running` 只表示 preset 声明已注册，不证明当前会话使用了该引擎。

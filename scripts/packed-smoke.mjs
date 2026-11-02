@@ -30,7 +30,7 @@ const hostRequire = createRequire(import.meta.url);
 const pluginRequire = createRequire(installed);
 const manifest = JSON.parse(await readFile(hostRequire.resolve('dsh-smart-compaction/package.json'), 'utf8'));
 assert.equal(manifest.version, '0.2.1-rc.1');
-for (const name of Object.keys(manifest.dependencies)) {
+for (const name of Object.keys(manifest.peerDependencies)) {
   assert.equal(await realpath(pluginRequire.resolve(name)), await realpath(hostRequire.resolve(name)), `${name} must share the host runtime module`);
 }
 console.log(`PASS host ${expectedDsh}: ${dshPackages.length} DSH packages, no nested copies, shared runtime modules`);
