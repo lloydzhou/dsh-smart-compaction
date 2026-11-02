@@ -170,11 +170,35 @@ describe('forced cache-first manual execution', () => {
   it('manual produces a real checkpoint even when prune alone would suffice', async () => {
     const f = telemetryFixture(10000, 300, 400); const flush = idle(f);
     f.stream.mockImplementation(async function* () { yield* summaryChunks(); });
+    const dryRun = vi.spyOn(f.pruner, 'pruneContent');
+    const original = f.session.surface.nodes.slice();
+    f.stream.mockImplementation(async function* () {
+      expect(dryRun).toHaveBeenCalled();
+      expect(f.session.surface.nodes).toEqual(original);
+      yield* summaryChunks();
+    });
     const result = await f.engine.compactNow(f.agent, new AbortController().signal);
     expect(result).not.toBeNull();
     expect(f.stream).toHaveBeenCalledOnce(); expect(flush).toHaveBeenCalledOnce();
     expect(f.session.snapshotEvents().filter(e => e.type === 'compaction/prune')).toHaveLength(0);
     expect(f.result()).toMatchObject({ trigger: 'manual', surfaceChanged: true, summaryAttempts: 1 });
+  });
+  it('manual checks retained tool pruning only after committing the original-prefix summary', async () => {
+    const f = telemetryFixture(10000, 300, 400); idle(f);
+    const old = f.session.surface.nodes[1]!;
+    f.session.append('user/message', createUserMessage({ content: [{ type: 'text', text: 'original '.repeat(800) }], source: { kind: 'user' } }), { surfaceOp: { op: 'replace', startSeq: old, endSeq: old }, sourceEventSeqs: [old] });
+    const original = f.session.surface.nodes.slice();
+    f.stream.mockImplementation(async function* () {
+      expect(f.session.surface.nodes).toEqual(original);
+      yield* summaryChunks();
+    });
+    const realRegion = f.engine.compactRegion.bind(f.engine);
+    vi.spyOn(f.engine, 'compactRegion').mockImplementation((start, _end, owner, signal) => realRegion(start, start, owner, signal));
+    const prune = vi.spyOn(f.pruner, 'pruneSession');
+    await f.engine.compactNow(f.agent, new AbortController().signal);
+    expect(prune).toHaveBeenCalledOnce();
+    const events = f.session.snapshotEvents();
+    expect(events.findIndex(e => e.type === 'compaction/end')).toBeLessThan(events.findIndex(e => e.type === 'compaction/prune'));
   });
   it('does not mistake crossing the automatic threshold for satisfying the manual target', async () => {
     const f = telemetryFixture(10000, 300); idle(f);

@@ -135,7 +135,7 @@ describe('manual compaction with real published projection', () => {
     const harness = manualHarness();
     expect(harness.registrations).toEqual(['compaction', 'manual-compaction']);
     const result = harness.render(node);
-    expect(result).toContain('4 items · ~1.2K tokens compacted'); expect(result).toContain('2 observed stream calls');
+    expect(result).toContain('4 items · ~1.2K tokens compacted'); expect(result).toContain('2 calls');
     expect(result.match(/ONE ORIGINAL SUMMARY/g)).toHaveLength(1);
     expect(result.indexOf('Decision & observed usage')).toBeLessThan(result.indexOf('ONE ORIGINAL SUMMARY'));
     expect(result).not.toContain('Native command result');
@@ -163,7 +163,7 @@ describe('manual compaction with real published projection', () => {
     const harness = manualHarness(false); const node = manualFixture();
     const collapsed = harness.render(node);
     expect(collapsed).toContain('"type":"button"'); expect(collapsed).toContain('"aria-expanded":false');
-    expect(collapsed).not.toContain('ONE ORIGINAL SUMMARY'); expect(collapsed).toContain('2 observed stream calls');
+    expect(collapsed).not.toContain('ONE ORIGINAL SUMMARY'); expect(collapsed).toContain('2 calls');
     harness.toggle();
     expect(harness.render(node)).toContain('"aria-expanded":true');
     expect(harness.render(node, projection(), 'session-1', true)).toContain('决策与实际观测用量');
@@ -191,13 +191,32 @@ describe('client projection correlation and native fallback', () => {
 });
 
 describe('honest usage presentation', () => {
+  it('uses a short singular label and retains explicitly known zero', () => {
+    const value = record(); value.llmStreamCalls = 1;
+    expect(collapsedFacts(value, defaultT)).toBe('1 call · cache hit 80.0%');
+    value.usage.cacheHitRatio = 0;
+    expect(collapsedFacts(value, defaultT)).toBe('1 call · cache hit 0.0%');
+    value.usage.cacheHitRatio = null;
+    expect(collapsedFacts(value, defaultT)).toBe('1 call');
+  });
+  it('explains missing reads separately from missing totals without changing native UI', () => {
+    const missingRead = record();
+    missingRead.usage = { inputTokens: 12115, outputTokens: 3743, totalTokens: 15858, cacheReadTokens: null, cacheWriteTokens: null, promptTokens: 12115, cacheHitRatio: null };
+    const parsed = parseDiagnostic(missingRead)!;
+    expect(collapsedFacts(parsed, defaultT)).toBe('2 calls');
+    expect(diagnosticRows(parsed, defaultT).find(row => row.label === 'Cache-hit ratio')?.value).toContain('zero or unreported');
+    expect(collapsedFacts(parsed, defaultT)).not.toContain('0.0%');
+    const noTotal = record();
+    noTotal.usage = { inputTokens: 6215, outputTokens: 3891, cacheReadTokens: 6144, cacheWriteTokens: null, promptTokens: null, cacheHitRatio: null };
+    expect(collapsedFacts(parseDiagnostic(noTotal), defaultT)).toBe('2 calls');
+  });
   it('never converts missing cache to zero or invents cache-hit ratio', () => {
     const value = record();
     value.usage = { inputTokens: 100, outputTokens: 50, cacheReadTokens: null, cacheWriteTokens: null, promptTokens: null, cacheHitRatio: null };
     const parsed = parseDiagnostic(value)!;
     expect(parsed).toBeDefined();
     const rows = diagnosticRows(parsed, defaultT);
-    for (const label of ['Cache-read tokens', 'Cache-write tokens', 'Cache-hit ratio', 'Total prompt tokens'])
+    for (const label of ['Cache-read tokens', 'Cache-write tokens', 'Total prompt tokens'])
       expect(rows.find(row => row.label === label)?.value).toBe('Unknown');
   });
   it('separates observed streams from unknowable billed model requests', () => {
@@ -247,9 +266,9 @@ describe('untrusted diagnostic payloads', () => {
   });
   it('adds concise single-line observed facts without inventing missing cache', () => {
     expect(collapsedFacts(undefined, defaultT)).toBe('');
-    expect(collapsedFacts(record(), defaultT)).toBe('2 observed stream calls · cache 80%');
+    expect(collapsedFacts(record(), defaultT)).toBe('2 calls · cache hit 80.0%');
     const value = record(); value.usage.cacheHitRatio = null;
-    expect(collapsedFacts(value, defaultT)).toBe('2 observed stream calls · cache Unknown');
+    expect(collapsedFacts(value, defaultT)).toBe('2 calls');
     expect(collapsedFacts(value, defaultT)).not.toContain('\n');
   });
   it('ships matching Chinese and English namespaces', () => {

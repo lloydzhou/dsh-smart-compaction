@@ -1,10 +1,11 @@
 /** Versioned, content-free host → browser projection. Never put prompts, summaries,
  * tool arguments/results, error messages, endpoints or credentials in this payload. */
-import { observedUsage } from '../src/usage.js';
+import { expectedObservedUsage, type UsageAggregationEvidence } from '../src/usage.js';
 export const PROJECTION_KEY = 'smartCompaction' as const;
 export const REASON_CODES = ['configured-policy', 'adaptive-benefit', 'context-overflow', 'manual', 'unknown'] as const;
 export type ReasonCode = typeof REASON_CODES[number];
 export interface DiagnosticUsage {
+  aggregation?: UsageAggregationEvidence[];
   totalTokens?: number | null;
   inputTokens: number | null;
   outputTokens: number | null;
@@ -103,11 +104,14 @@ export function parseDiagnostic(value: unknown): CompactionDiagnostic | undefine
       usage.totalTokens = value.usage.totalTokens as number | null;
     }
     // Same evidence rules as the backend; schema-v1 without total remains valid.
-    const normalized = observedUsage(usage);
-    if (usage.promptTokens !== normalized.promptTokens) return;
-    const expectedRatio = normalized.cacheHitRatio;
-    if (ratio !== expectedRatio) return;
-    usage.cacheHitRatio = expectedRatio;
+    if (value.usage.aggregation !== undefined) usage.aggregation = value.usage.aggregation as UsageAggregationEvidence[];
+    usage.cacheHitRatio = ratio as number | null;
+    const normalized = expectedObservedUsage(usage);
+    if (!normalized) return;
+    if (normalized.aggregation) {
+      if (normalized.aggregation.length !== value.llmStreamCalls || value.unknownSummaryAttempts !== 0) return;
+      usage.aggregation = normalized.aggregation;
+    }
     const result: CompactionDiagnostic = {
       operationId: value.operationId, sessionId: value.sessionId, summaryEventSeq: value.summaryEventSeq,
       ...(value.compactionId === undefined ? {} : { compactionId: value.compactionId as string }),
@@ -211,10 +215,20 @@ export function nativeSummaryLabel(node: NativeSummary, t: Translate): string {
     return t('completed', { items: node.shadowedItemCount, tokens: formatTokens(node.shadowedTokenCount, t) });
   return t(node.summary !== null ? 'expand' : 'unavailable');
 }
+export function cacheRatioLabel(record: CompactionDiagnostic, t: Translate): string {
+  const usage = record.usage;
+  if (usage.cacheHitRatio !== null) return `${(usage.cacheHitRatio * 100).toFixed(1)}%`;
+  if (record.unknownSummaryAttempts > 0) return t('cacheMissingAttempts');
+  if (usage.cacheReadTokens === null) return t('cacheMissingRead');
+  if (usage.promptTokens === 0) return t('cacheEmptyPrompt');
+  return t('cacheMissingDenominator');
+}
+
 export function collapsedFacts(record: CompactionDiagnostic | undefined, t: Translate): string {
   if (!record) return '';
-  return [t('inlineCalls', { calls: record.llmStreamCalls }),
-    t('inlineCache', { ratio: record.usage.cacheHitRatio === null ? t('unknown') : `${(record.usage.cacheHitRatio * 100).toFixed(0)}%` })].join(' · ');
+  const facts = [t(record.llmStreamCalls === 1 ? 'inlineCall' : 'inlineCalls', { calls: record.llmStreamCalls })];
+  if (record.usage.cacheHitRatio !== null) facts.push(t('inlineCache', { ratio: cacheRatioLabel(record, t) }));
+  return facts.join(' · ');
 }
 export function diagnosticRows(record: CompactionDiagnostic, t: Translate): readonly { label: string; value: string }[] {
   const number = (value: number | null | undefined) => value == null ? t('unknown') : String(value);
@@ -229,7 +243,7 @@ export function diagnosticRows(record: CompactionDiagnostic, t: Translate): read
     { label: t('unknownUsageCalls'), value: number(record.unknownUsageCalls) },
     { label: t('unknownSummaryAttempts'), value: number(record.unknownSummaryAttempts) },
     ...counterKeys.map(key => ({ label: t(key), value: number(record.usage[key]) })),
-    { label: t('cacheHitRatio'), value: record.usage.cacheHitRatio === null ? t('unknown') : `${(record.usage.cacheHitRatio * 100).toFixed(1)}%` },
+    { label: t('cacheHitRatio'), value: cacheRatioLabel(record, t) },
     ...(record.decisions ?? []).flatMap((fact, index) => [
       { label: `${index + 1}. ${t(`action.${fact.action}`)}`, value: t(`reason.${fact.reasonCode}`) },
       ...(fact.safetyOverride ? [{ label: t('safetyOverride'), value: t('yes') }] : []),

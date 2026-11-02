@@ -4,6 +4,7 @@ import { appendPluginRecord, pluginRecordOf, type Session } from '@deepseek-ai/d
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection';
 import { z } from 'zod';
 import type { CompactionResultSink, CompactionTelemetryResult } from './telemetry.js';
+import { aggregateUsage, observedUsage, usageFields } from './usage.js';
 
 export const DIAGNOSTIC_RECORD_TYPE = 'plugin:smart-compaction/diagnostic' as const;
 export const MAX_DIAGNOSTIC_RECORDS = 64;
@@ -11,7 +12,9 @@ const count = z.number().finite().nonnegative();
 const maybeCount = count.nullable();
 const text = z.string().max(512);
 const usage = z.object({ inputTokens: maybeCount, outputTokens: maybeCount, cacheReadTokens: maybeCount,
-  cacheWriteTokens: maybeCount, totalTokens: maybeCount.optional(), promptTokens: maybeCount, cacheHitRatio: z.number().min(0).max(1).nullable() });
+  cacheWriteTokens: maybeCount, totalTokens: maybeCount.optional(), promptTokens: maybeCount, cacheHitRatio: z.number().min(0).max(1).nullable(),
+  aggregation: z.array(z.object({ inputTokens: maybeCount, outputTokens: maybeCount, cacheReadTokens: maybeCount,
+    cacheWriteTokens: maybeCount, totalTokens: maybeCount.optional() }).strict()).max(128).optional() });
 const decision = z.object({ action: z.enum(['policy', 'prune', 'summary', 'skip']), reason: text,
   totalTokens: maybeCount, hardThresholdTokens: maybeCount, effectiveThresholdTokens: maybeCount,
   projectedPruneTokens: maybeCount, retainTokens: maybeCount, retainedTokens: maybeCount,
@@ -34,26 +37,68 @@ export const diagnosticRecordSchema = z.object({ schemaVersion: z.literal(1), se
 export type DiagnosticRecord = z.infer<typeof diagnosticRecordSchema>;
 export const diagnosticStateSchema = z.object({ schemaVersion: z.literal(1), sessionId: text, records: z.array(diagnosticRecordSchema).max(MAX_DIAGNOSTIC_RECORDS) });
 export type DiagnosticState = z.infer<typeof diagnosticStateSchema>;
+// Host-only replay evidence: never retain summary text or expose the cache on the wire.
+const summaryMetadataSchema = z.object({ seq: count.int(), compactionId: text, usage });
+const diagnosticProjectionStateSchema = diagnosticStateSchema.extend({
+  summaries: z.array(summaryMetadataSchema).max(MAX_DIAGNOSTIC_RECORDS).optional(),
+});
+type DiagnosticProjectionState = z.infer<typeof diagnosticProjectionStateSchema>;
+
+/** Recover only the total omitted by legacy writers, never genuinely unknown newer usage.
+ * Strict one-to-one evidence deliberately excludes retries and incomplete correlations. */
+function enrichLegacyRecord(record: DiagnosticRecord, summaries: NonNullable<DiagnosticProjectionState['summaries']>): DiagnosticRecord {
+  const result = record.result;
+  const call = result.calls[0];
+  const attempt = result.attempts[0];
+  if (record.status !== 'success' || result.status !== 'success'
+    || record.sessionId !== result.sessionId || record.operationId !== result.operationId
+    || result.calls.length !== 1 || result.attempts.length !== 1 || !call || !attempt
+    || result.summaryAttempts !== 1 || result.llmStreamCalls !== 1 || result.unknownSummaryAttempts !== 0
+    || attempt.status !== 'success' || attempt.index !== 1 || call.summaryAttempt !== attempt.index
+    || !['stop', 'success'].includes(call.status)
+    || call.usage.totalTokens !== undefined || result.usage.totalTokens !== undefined
+    || record.summaryEventSeqs.length !== 1 || result.summaryEventSeqs.length !== 1
+    || record.compactionIds.length !== 1 || result.compactionIds.length !== 1
+    || record.summaryEventSeqs[0] !== result.summaryEventSeqs[0]
+    || record.compactionIds[0] !== result.compactionIds[0] || attempt.compactionId !== record.compactionIds[0]) return record;
+  const matches = summaries.filter(summary => summary.seq === record.summaryEventSeqs[0] && summary.compactionId === attempt.compactionId);
+  const summary = matches[0];
+  if (matches.length !== 1 || !summary || summary.usage.totalTokens == null) return record;
+  // Even known aggregate subtotals must agree: no positional/proximity guessing.
+  if (usageFields.some(key => [call.usage[key], result.usage[key], result.knownUsageTotals[key]]
+    .some(value => value !== null && value !== summary.usage[key]))) return record;
+  const recovered = observedUsage({ ...call.usage, totalTokens: summary.usage.totalTokens });
+  if ([call.usage, result.usage].some(existing => existing.promptTokens !== null && existing.promptTokens !== recovered.promptTokens
+    || existing.cacheHitRatio !== null && existing.cacheHitRatio !== recovered.cacheHitRatio)) return record;
+  return { ...record, result: { ...result, calls: [{ ...call, usage: recovered }], usage: aggregateUsage([recovered]) } };
+}
 
 declare module '@deepseek-ai/dsh-session/types' {
   interface PluginRecordMap { 'plugin:smart-compaction/diagnostic': DiagnosticRecord }
 }
 declare module '@deepseek-ai/dsh-session-projection/types' {
   interface SessionProjectionMap { smartCompaction: DiagnosticState }
-  interface SessionProjectionStateMap { smartCompaction: DiagnosticState }
+  interface SessionProjectionStateMap { smartCompaction: DiagnosticProjectionState }
 }
 
 export const diagnosticProjection = {
-  key: 'smartCompaction', stateVersion: 1, stateSchema: diagnosticStateSchema,
+  key: 'smartCompaction', stateVersion: 2, stateSchema: diagnosticProjectionStateSchema,
   init: header => ({ schemaVersion: 1, sessionId: String(header.id), records: [] }),
   apply(state, event) {
+    if (event.type === 'compaction/summary') {
+      const metadata = summaryMetadataSchema.safeParse({ seq: Number(event.seq),
+        compactionId: event.data.compactionId, usage: observedUsage(event.data.usage) });
+      if (!metadata.success) return state;
+      return { ...state, summaries: [...(state.summaries ?? []), metadata.data].slice(-MAX_DIAGNOSTIC_RECORDS) };
+    }
     const record = pluginRecordOf(event);
     if (record?.type !== DIAGNOSTIC_RECORD_TYPE) return state;
     const parsed = diagnosticRecordSchema.safeParse(record.data);
     if (!parsed.success || parsed.data.sessionId !== state.sessionId) return state;
-    return { ...state, records: [...state.records.filter(item => item.operationId !== parsed.data.operationId), parsed.data].slice(-MAX_DIAGNOSTIC_RECORDS) };
+    const enriched = enrichLegacyRecord(parsed.data, state.summaries ?? []);
+    return { ...state, records: [...state.records.filter(item => item.operationId !== enriched.operationId), enriched].slice(-MAX_DIAGNOSTIC_RECORDS) };
   },
-  wire: { viewSchema: diagnosticStateSchema, view: state => state },
+  wire: { viewSchema: diagnosticStateSchema, view: state => ({ schemaVersion: state.schemaVersion, sessionId: state.sessionId, records: state.records }) },
 } satisfies ProjectionDefinition<'smartCompaction'>;
 
 /** Pending summary-hook results are flushed only at a later completed operation.

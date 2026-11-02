@@ -1,10 +1,14 @@
 import type { Translate } from './model.js';
 export const NAMESPACE = 'smart-compaction';
 export const en = {
+  cacheMissingRead: 'read count unavailable (zero or unreported)',
+  cacheMissingAttempts: 'incomplete attempt evidence',
+  cacheEmptyPrompt: 'not applicable (empty prompt)',
+  cacheMissingDenominator: 'prompt total unavailable or inconsistent',
   'number.thousand': '{value}K', 'number.million': '{value}M',
   commandTitle: 'compact', commandRunning: 'Compacting context…', commandFailed: 'Failed', commandDone: 'Done',
   title: 'Context compaction', completed: '{items} items · ~{tokens} tokens compacted', expand: 'Show summary', unavailable: 'Summary unavailable',
-  inlineCalls: '{calls} observed stream calls', inlineCache: 'cache {ratio}', details: 'Decision & observed usage', unknown: 'Unknown', reason: 'Decision reason', trigger: 'Trigger', status: 'Operation status',
+  inlineCall: '{calls} call', inlineCalls: '{calls} calls', inlineCache: 'cache hit {ratio}', details: 'Decision & observed usage', unknown: 'Unknown', reason: 'Decision reason', trigger: 'Trigger', status: 'Operation status',
   'reason.configured-policy': 'Configured token threshold and retention policy', 'reason.adaptive-benefit': 'Positive estimated finite-horizon benefit (heuristic, not guaranteed savings)',
   'reason.context-overflow': 'Context overflow recovery', 'reason.manual': 'Explicit compaction request', 'reason.unknown': 'Reason unavailable',
   'trigger.pressure': 'Context pressure', 'trigger.context-overflow': 'Context overflow', 'trigger.manual': 'Manual', 'trigger.summary-hook': 'Summary hook', 'trigger.unknown': 'Unknown',
@@ -25,10 +29,14 @@ export const en = {
   footnotes: 'Footnotes', copy: 'Copy', copied: 'Copied', copyCode: 'Copy code', wrap: 'Wrap lines', unwrap: 'Unwrap lines',
 };
 export const zh: Record<keyof typeof en, string> = {
+  cacheMissingRead: '读取量不明（零值或未报告）',
+  cacheMissingAttempts: '调用证据不完整',
+  cacheEmptyPrompt: '不适用（输入为空）',
+  cacheMissingDenominator: '输入总量缺失或不一致',
   'number.thousand': '{value}K', 'number.million': '{value}M',
   commandTitle: 'compact', commandRunning: '正在压缩上下文…', commandFailed: '失败', commandDone: '完成',
   title: '上下文压缩', completed: '已压缩 {items} 项 · 约 {tokens} token', expand: '展开摘要', unavailable: '摘要不可用',
-  inlineCalls: '{calls} 次流调用观测', inlineCache: '缓存 {ratio}', details: '决策与实际观测用量', unknown: '未知', reason: '决策原因', trigger: '触发条件', status: '操作状态',
+  inlineCall: '{calls} 次调用', inlineCalls: '{calls} 次调用', inlineCache: '缓存 {ratio}', details: '决策与实际观测用量', unknown: '未知', reason: '决策原因', trigger: '触发条件', status: '操作状态',
   'reason.configured-policy': '配置的 token 阈值与保留策略', 'reason.adaptive-benefit': '预估有限周期净收益为正（启发式，不保证节省）',
   'reason.context-overflow': '上下文溢出恢复', 'reason.manual': '显式压缩请求', 'reason.unknown': '原因不可用',
   'trigger.pressure': '上下文压力', 'trigger.context-overflow': '上下文溢出', 'trigger.manual': '手动', 'trigger.summary-hook': '摘要钩子', 'trigger.unknown': '未知',

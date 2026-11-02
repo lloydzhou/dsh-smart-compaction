@@ -8,7 +8,9 @@ Automatic step pressure and context-overflow recovery first price tool-result pr
 
 After a successful summary the provider remeasures pressure, and only prunes retained tool results if pressure still requires reduction. Summary overflow retries use smaller balanced prefixes, bounded by `summaryFallbackAttempts`. If no smaller prefix exists or summary work fails, a final useful pruning pass may remain durable even though the summary error is rethrown. Cancellation prevents that fallback. Successful summary transactions, checkpoint framing, source attribution, shrink checks, and persistence remain owned by Basic's `compactRegion` implementation.
 
-**Manual compaction and model-switch compaction retain stock Basic selection behavior.** The inherited model-switch listener uses a private stock pressure path, not the cache-first override; it may prune before summarizing. This package does not intercept that method or claim cache-first behavior on model switches. The protected summary wrapper rejects late adapter responses after cancellation for all inherited paths.
+**Manual compaction uses the plugin selector and public idle transaction.** It dry-runs pruning without mutations before summarizing the original prefix, then remeasures and prunes the retained tail only if still over its manual target. Unlike automatic checks, native `/compact` currently requires a real summary checkpoint: the public result has no prune-only success variant, and null is displayed as no compactable history. Thus manual dry-run does not skip the LLM merely because pruning would suffice; no fake checkpoint is manufactured. This is an explicit current API limitation, not full prune-only equivalence.
+
+**Model-switch compaction remains a separate stock path.** The inherited model-switch listener uses a private stock pressure path, not the cache-first override; it may prune before summarizing. This package does not intercept that method or claim cache-first behavior on model switches. The protected summary wrapper rejects late adapter responses after cancellation for all inherited paths.
 
 ## Configuration
 

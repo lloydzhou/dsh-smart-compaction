@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { Context } from '@deepseek-ai/cordis';
-import { Session, SessionId, pluginRecordOf } from '@deepseek-ai/dsh-session';
+import { Session, SessionId, pluginRecordOf, appendPluginRecord } from '@deepseek-ai/dsh-session';
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection';
 import { CompactionId } from '@deepseek-ai/dsh-compaction';
 import LlmRuntime, { createUserMessage, createSystemMessage, type StreamChunk } from '@deepseek-ai/dsh-llm';
@@ -22,6 +22,109 @@ function fixture() {
   return { ctx, projection, sink, telemetry, session };
 }
 function records(session: Session) { return session.snapshotEvents().flatMap(event => { const r = pluginRecordOf(event); return r ? [r] : []; }); }
+
+async function legacyFixture() {
+  const f = fixture();
+  const id = CompactionId('legacy');
+  const start = f.session.append('compaction/start', { compactionId: id, turn: null });
+  let result!: CompactionTelemetryResult;
+  const rawUsage = { inputTokens: 6215, outputTokens: 3891, totalTokens: 16250, cacheReadTokens: 6144 };
+  await new CompactionTelemetry(f.ctx, (_session, value) => { result = value; }).summary(f.session, undefined,
+    async () => ({ provider: 'mock', model: 'test', llmStreamCall: true, usage: rawUsage }));
+  const summaryData = { compactionId: id, summary: [], shadowedRange: { start: start.seq, end: start.seq },
+    shadowedSeqs: [], shadowedTokenCount: 1, provider: 'mock', model: 'test', usage: rawUsage };
+  const summary = f.session.append('compaction/summary', summaryData);
+  f.session.append('compaction/end', { compactionId: id, turn: null });
+  // Reproduce the original writer: partial components, no preserved total/denominator.
+  for (const usage of [result.usage, result.calls[0]!.usage]) {
+    delete usage.totalTokens; usage.promptTokens = null; usage.cacheHitRatio = null;
+  }
+  result.summaryEventSeqs = [summary.seq];
+  const record = diagnosticRecordSchema.parse({ schemaVersion: 1, sessionId: f.session.id,
+    operationId: result.operationId, summaryEventSeqs: [summary.seq], compactionIds: [id],
+    trigger: result.trigger, status: result.status, decisions: result.decisions, result });
+  return { ...f, record, summary, summaryData };
+}
+
+describe('legacy projection-only usage recovery', () => {
+  it('recovers the exact linked legacy total as 49.7% without mutating source data', async () => {
+    const f = await legacyFixture();
+    appendPluginRecord(f.session, 'plugin:smart-compaction/diagnostic', f.record);
+    const event = f.session.snapshotEvents().at(-1)!;
+    const before = structuredClone(f.session.snapshotEvents());
+    const state = f.projection.snapshot(f.session).values.smartCompaction!;
+    expect(state.records[0]!.result.usage).toMatchObject({ totalTokens: 16250, promptTokens: 12359,
+      cacheReadTokens: 6144, cacheWriteTokens: null, cacheHitRatio: 6144 / 12359 });
+    expect((state.records[0]!.result.usage.cacheHitRatio! * 100).toFixed(1)).toBe('49.7');
+    expect(state.records[0]!.result.calls[0]!.usage.totalTokens).toBe(16250);
+    expect(f.session.snapshotEvents()).toEqual(before);
+    expect(f.session.snapshotEvents().at(-1)).toBe(event);
+    expect(f.record.result.usage.totalTokens).toBeUndefined();
+    expect(state).not.toHaveProperty('summaries');
+    const checkpoint = f.projection.checkpoint(f.session);
+    expect(checkpoint.smartCompaction!.ver).toBe(2);
+    expect(f.projection.viewCheckpoint(checkpoint).smartCompaction).toEqual(state);
+    const old = { smartCompaction: { ...checkpoint.smartCompaction!, ver: 1 } };
+    expect(f.projection.viewCheckpoint(old)).toEqual({});
+    expect(f.projection.restoreFloor(old)).toBe(0);
+    const replay = f.session.snapshotEvents().reduce<Parameters<typeof diagnosticProjection.apply>[0]>((s, e) => diagnosticProjection.apply(s, e), diagnosticProjection.init(f.session.header));
+    expect(diagnosticProjection.wire.view(replay)).toEqual(state);
+  });
+
+  it.each(['seq', 'id', 'result-seq', 'result-id', 'call-counter', 'aggregate-counter', 'subtotal-counter', 'retry', 'failed', 'newer', 'missing-read'] as const)(
+    'does not infer usage for %s evidence', async kind => {
+      const f = await legacyFixture(); const r = f.record.result;
+      if (kind === 'seq') { f.record.summaryEventSeqs = [999]; r.summaryEventSeqs = [999]; }
+      if (kind === 'id') { f.record.compactionIds = ['other']; r.compactionIds = ['other']; r.attempts[0]!.compactionId = 'other'; }
+      if (kind === 'result-seq') r.summaryEventSeqs = [999];
+      if (kind === 'result-id') r.compactionIds = ['other'];
+      if (kind === 'call-counter') r.calls[0]!.usage.inputTokens = 6216;
+      if (kind === 'aggregate-counter') r.usage.outputTokens = 3892;
+      if (kind === 'subtotal-counter') r.knownUsageTotals.cacheReadTokens = 6143;
+      if (kind === 'retry') { r.summaryAttempts = 2; r.attempts.push({ ...r.attempts[0]!, index: 2 }); }
+      if (kind === 'failed') r.calls[0]!.status = 'error';
+      if (kind === 'newer' || kind === 'missing-read') {
+        r.usage.totalTokens = null; r.calls[0]!.usage.totalTokens = null;
+        if (kind === 'missing-read') { r.usage.totalTokens = 16250; r.calls[0]!.usage.totalTokens = 16250;
+          r.usage.cacheReadTokens = null; r.calls[0]!.usage.cacheReadTokens = null; }
+      }
+      appendPluginRecord(f.session, 'plugin:smart-compaction/diagnostic', f.record);
+      expect(f.projection.snapshot(f.session).values.smartCompaction!.records[0]).toEqual(f.record);
+    });
+
+  it('retains bounded evidence across a host-state checkpoint without exposing it', async () => {
+    const f = await legacyFixture();
+    f.projection.snapshot(f.session);
+    const row = f.projection.checkpoint(f.session).smartCompaction!;
+    const restored = diagnosticProjection.stateSchema.parse(JSON.parse(JSON.stringify(row.val)));
+    appendPluginRecord(f.session, 'plugin:smart-compaction/diagnostic', f.record);
+    const next = diagnosticProjection.apply(restored, f.session.snapshotEvents().at(-1)!);
+    expect(next.records[0]!.result.usage.cacheHitRatio).toBe(6144 / 12359);
+    expect(diagnosticProjection.wire.view(next)).not.toHaveProperty('summaries');
+  });
+
+  it('never backfills an earlier diagnostic from a future summary', async () => {
+    const f = await legacyFixture();
+    // Deliberately claim the future sequence while keeping both arrays consistent.
+    const futureSeq = Number(f.session.seq) + 1;
+    f.record.summaryEventSeqs = [futureSeq]; f.record.result.summaryEventSeqs = [futureSeq];
+    appendPluginRecord(f.session, 'plugin:smart-compaction/diagnostic', f.record);
+    const future = f.session.append('compaction/summary', f.summaryData);
+    expect(future.seq).toBe(futureSeq);
+    expect(f.projection.snapshot(f.session).values.smartCompaction!.records[0]).toEqual(f.record);
+  });
+
+  it('bounds persisted metadata, retains only seq/id/usage and omits it from the wire', async () => {
+    const f = await legacyFixture();
+    for (let i = 0; i < 70; i++) f.session.append('compaction/summary', f.summaryData);
+    const state = f.projection.stateOf(f.session, 'smartCompaction')!;
+    expect(state.summaries).toHaveLength(64);
+    expect(Object.keys(state.summaries![0]!).sort()).toEqual(['compactionId', 'seq', 'usage']);
+    expect(f.projection.snapshot(f.session).values.smartCompaction).not.toHaveProperty('summaries');
+    appendPluginRecord(f.session, 'plugin:smart-compaction/diagnostic', f.record);
+    expect(f.projection.snapshot(f.session).values.smartCompaction!.records[0]).toEqual(f.record);
+  });
+});
 
 describe('durable public diagnostics', () => {
   it('omits routine no-ops but retains failed operations without error text or surface changes', async () => {

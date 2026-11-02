@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { observedUsage, aggregateUsage } from '../src/usage.js';
+import { observedUsage, aggregateUsage, expectedObservedUsage, MAX_USAGE_AGGREGATION } from '../src/usage.js';
 import { parseDiagnostic } from '../client/model.js';
 
 describe('optional provider cache counters', () => {
@@ -33,6 +33,72 @@ describe('optional provider cache counters', () => {
     expect(observedUsage(usage).cacheHitRatio).toBe(.85);
     expect(aggregateUsage(calls, 1).cacheHitRatio).toBeNull();
     expect(aggregateUsage([...calls, observedUsage({ inputTokens: 5, outputTokens: 1 })]).cacheHitRatio).toBeNull();
+  });
+  it('preserves known prompt sums with missing output and complementary missing components', () => {
+    const calls = [
+      observedUsage({ inputTokens: 20, cacheReadTokens: 80, cacheWriteTokens: 0 }),
+      observedUsage({ outputTokens: 10, totalTokens: 210, cacheReadTokens: 100 }),
+    ];
+    const usage = aggregateUsage(calls);
+    expect(usage).toMatchObject({ inputTokens: null, outputTokens: null, cacheWriteTokens: null,
+      totalTokens: null, promptTokens: 300, cacheReadTokens: 180, cacheHitRatio: .6 });
+    expect(observedUsage(usage).promptTokens).toBeNull();
+    expect(expectedObservedUsage(usage)).toEqual(usage);
+    expect(usage.aggregation).toEqual([
+      { inputTokens: 20, outputTokens: null, cacheReadTokens: 80, cacheWriteTokens: 0 },
+      { inputTokens: null, outputTokens: 10, cacheReadTokens: 100, cacheWriteTokens: null, totalTokens: 210 },
+    ]);
+  });
+  it('retains per-call contradictions even when inconsistent totals cancel exactly', () => {
+    const calls = [90, 130].map(totalTokens => observedUsage({ inputTokens: 20,
+      outputTokens: 10, cacheReadTokens: 80, cacheWriteTokens: 0, totalTokens }));
+    const usage = aggregateUsage(calls);
+    expect(usage).toMatchObject({ totalTokens: 220, promptTokens: null, cacheHitRatio: null });
+    expect(observedUsage(usage).cacheHitRatio).toBe(.8);
+    expect(expectedObservedUsage(usage)).toEqual(usage);
+    expect(expectedObservedUsage({ ...usage, promptTokens: 200, cacheHitRatio: .8 })).toBeNull();
+  });
+  it('does not trust caller supplied derived values in aggregation', () => {
+    const usage = aggregateUsage([{ ...observedUsage({ cacheReadTokens: 50 }), promptTokens: 100, cacheHitRatio: .5 }]);
+    expect(usage.promptTokens).toBeNull();
+    expect(expectedObservedUsage(usage)).toEqual(usage);
+  });
+  it('omits evidence when unknown attempts suppress all totals', () => {
+    const usage = aggregateUsage([observedUsage({ inputTokens: 20, cacheReadTokens: 80, cacheWriteTokens: 0 })], 1);
+    expect(usage).toEqual({ inputTokens: null, outputTokens: null, cacheReadTokens: null,
+      cacheWriteTokens: null, totalTokens: null, promptTokens: null, cacheHitRatio: null });
+    expect(expectedObservedUsage(usage)).toEqual(usage);
+  });
+  it('bounds evidence without truncating or resurrecting inconsistent totals', () => {
+    const call = observedUsage({ inputTokens: 20, outputTokens: 10, cacheReadTokens: 80, cacheWriteTokens: 0 });
+    const atLimit = aggregateUsage(Array(MAX_USAGE_AGGREGATION).fill(call));
+    expect(atLimit.aggregation).toHaveLength(MAX_USAGE_AGGREGATION);
+    expect(expectedObservedUsage(atLimit)).toEqual(atLimit);
+    const aboveLimit = aggregateUsage(Array(MAX_USAGE_AGGREGATION + 1).fill(call));
+    expect(aboveLimit.aggregation).toBeUndefined();
+    expect(expectedObservedUsage(aboveLimit)).toEqual(aboveLimit);
+    const contradictory = [90, 130].map(totalTokens => observedUsage({ ...call, totalTokens }));
+    const suppressed = aggregateUsage(Array.from({ length: 130 }, (_, index) => contradictory[index % 2]!));
+    expect(suppressed.aggregation).toBeUndefined();
+    expect(suppressed.promptTokens).toBeNull();
+    expect(expectedObservedUsage(suppressed)).toEqual(suppressed);
+  });
+  it('rejects malformed, nested, overlong and forged aggregate evidence', () => {
+    const usage = aggregateUsage([observedUsage({ inputTokens: 20, outputTokens: 10, cacheReadTokens: 80, cacheWriteTokens: 0 })]);
+    const entry = usage.aggregation![0]!;
+    for (const aggregation of [[], [null], new Array(1), Array(MAX_USAGE_AGGREGATION + 1).fill(entry),
+      [{ ...entry, aggregation: [] }], [{ ...entry, promptTokens: 100 }], [{ ...entry, cacheReadTokens: -1 }],
+      [{ ...entry, inputTokens: undefined }]]) {
+      expect(expectedObservedUsage({ ...usage, aggregation })).toBeNull();
+    }
+    for (const field of ['inputTokens', 'totalTokens', 'promptTokens', 'cacheHitRatio']) {
+      expect(expectedObservedUsage({ ...usage, [field]: 1 })).toBeNull();
+    }
+    let touched = false;
+    const accessor = Object.defineProperty({ ...entry }, 'inputTokens', { get() { touched = true; return 20; } });
+    expect(expectedObservedUsage({ ...usage, aggregation: [accessor] })).toBeNull();
+    expect(touched).toBe(false);
+    expect(expectedObservedUsage(observedUsage({ inputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 }))).not.toBeNull();
   });
   it('rejects malformed counts and sum overflow', () => {
     expect(observedUsage({ inputTokens: NaN, outputTokens: 0, totalTokens: Infinity, cacheReadTokens: -1 }).cacheHitRatio).toBeNull();

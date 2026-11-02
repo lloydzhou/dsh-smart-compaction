@@ -308,7 +308,8 @@ export class CacheFirstCompactionEngine extends BasicCompactionEngine {
     });
     // A manual request is not an economic opportunity: it cannot be deferred. Price a
     // native-retain=0 prefix with a summary allowance, capped at a 25% reduction.
-    // This explicit target lets sufficient pruning avoid a needless model call.
+    // This target gates post-summary pruning. Native /compact currently requires
+    // a real checkpoint, so manual dry-run cannot return prune-only success.
     const manualTarget = Math.max(1, Math.min(Math.floor(measurement.totalTokens * 0.75),
       measurement.totalTokens - (ranges.at(-1)?.removedTokens ?? 0) + policy.maxTokens));
     const decision = manual
@@ -326,7 +327,7 @@ export class CacheFirstCompactionEngine extends BasicCompactionEngine {
     this.telemetry.recordDecision({ action: 'policy', reason: decision?.reason ?? 'policy declined optional work; executor owns hard-limit safety', ...facts });
     if (!manual && trigger === 'pressure' && (measurement.totalTokens < threshold || (decision === null && measurement.totalTokens < hardThreshold))) return null;
     const pruner = this.ctx.get('toolResultPruner');
-    const prune = (requireSufficient: boolean): boolean => {
+    const prune = (requireSufficient: boolean, dryRunOnly = false): boolean => {
       signal.throwIfAborted();
       assertInactive(session);
       measurement = meter.measure(session);
@@ -334,8 +335,8 @@ export class CacheFirstCompactionEngine extends BasicCompactionEngine {
       const projected = projectedPruneTokens(session, measurement, meter, pruner);
       const useful = projected < measurement.totalTokens && (!requireSufficient || projected < threshold);
       this.telemetry.recordDecision({ action: 'prune', ...facts, totalTokens: measurement.totalTokens,
-        projectedPruneTokens: projected, reason: useful ? 'projected prune is useful; execute' : projected >= measurement.totalTokens ? 'prune cannot reduce measured tokens' : 'prune alone cannot reach effective threshold; preserve prefix for summary' });
-      if (!useful) return false;
+        projectedPruneTokens: projected, reason: dryRunOnly ? 'manual dry-run only; preserve original prefix for required summary checkpoint' : useful ? 'projected prune is useful; execute' : projected >= measurement.totalTokens ? 'prune cannot reduce measured tokens' : 'prune alone cannot reach effective threshold; preserve prefix for summary' });
+      if (!useful || dryRunOnly) return false;
       const before = measurement.totalTokens;
       pruner.pruneSession(session);
       measurement = meter.measure(session);
@@ -346,7 +347,8 @@ export class CacheFirstCompactionEngine extends BasicCompactionEngine {
     // Explicit /compact promises a summary checkpoint: the stock command maps
     // null to "No compactable history yet". Do not commit a prune-only manual
     // mutation that would be falsely presented as no work; preserve its prefix.
-    if (!manual && prune(true) && measurement.totalTokens < threshold) return null;
+    if (manual) prune(true, true);
+    else if (prune(true) && measurement.totalTokens < threshold) return null;
     let result: CompactionResult | null = null;
     for (let attempt = 0; attempt <= policy.compactionRetries; attempt++) {
       signal.throwIfAborted();
@@ -381,7 +383,10 @@ export class CacheFirstCompactionEngine extends BasicCompactionEngine {
       // Manual validates shrink of the selected span. Concurrent context appended
       // outside that span may legitimately increase the whole-session measurement.
       // One useful summary fulfills the request; the target gates pruning only.
-      if (manual && summarized) return result;
+      if (manual && summarized) {
+        if (measurement.totalTokens >= threshold) prune(false);
+        return result;
+      }
       if (!summarized || measurement.totalTokens >= before) throw new Error('cache-first: compaction made no measured progress');
       if (measurement.totalTokens < threshold) return result;
       // Only after preserving a summary of the original prefix may retained results be rewritten.
