@@ -1,0 +1,73 @@
+{
+  "name": "dsh-smart-compaction",
+  "version": "0.1.0",
+  "description": "Cache-first compaction with optional adaptive economics for DeepSeek Harness",
+  "type": "module",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/lloydzhou/dsh-smart-compaction.git" },
+  "homepage": "https://github.com/lloydzhou/dsh-smart-compaction#readme",
+  "bugs": { "url": "https://github.com/lloydzhou/dsh-smart-compaction/issues" },
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "import": "./lib/index.js"
+    },
+    "./policy": {
+      "types": "./lib/policy.d.ts",
+      "import": "./lib/policy.js"
+    },
+    "./package.json": "./package.json",
+    "./economics": {
+      "types": "./lib/adaptive/economics.d.ts",
+      "import": "./lib/adaptive/economics.js"
+    }
+  },
+  "files": [
+    "lib",
+    "README.md",
+    "docs",
+    "cordis.patch.yml",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "engines": {
+    "node": ">=24.9.0",
+    "dsh": "0.2.1-rc.5"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/schemastery": "3.18.5",
+    "@deepseek-ai/dsh-agent": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-compaction": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-compaction-basic": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-compaction-tool-result-pruner": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-llm": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-session": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-token-meter": "0.2.1-rc.5"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis-plugin-loader": "1.0.6",
+    "@deepseek-ai/cordis-plugin-include": "1.0.10",
+    "@deepseek-ai/dsh-session-projection": "0.2.1-rc.5",
+    "js-yaml": "^4.1.1",
+    "@types/js-yaml": "^4.0.9",
+    "@deepseek-ai/dsh-agent-loop": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-system-prompt": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.5",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
+  }
+}
