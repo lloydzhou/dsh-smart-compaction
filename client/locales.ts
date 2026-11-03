@@ -1,6 +1,8 @@
 import type { Translate } from './model.js';
+import { settingsEn, settingsZh } from './settings-locales.js';
 export const NAMESPACE = 'smart-compaction';
 export const en = {
+  ...settingsEn,
   cacheMissingRead: 'read count unavailable (zero or unreported)',
   cacheMissingAttempts: 'incomplete attempt evidence',
   cacheEmptyPrompt: 'not applicable (empty prompt)',
@@ -29,6 +31,7 @@ export const en = {
   footnotes: 'Footnotes', copy: 'Copy', copied: 'Copied', copyCode: 'Copy code', wrap: 'Wrap lines', unwrap: 'Unwrap lines',
 };
 export const zh: Record<keyof typeof en, string> = {
+  ...settingsZh,
   cacheMissingRead: '读取量不明（零值或未报告）',
   cacheMissingAttempts: '调用证据不完整',
   cacheEmptyPrompt: '不适用（输入为空）',

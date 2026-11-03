@@ -1,18 +1,39 @@
 /** Public profile integration: replace only the configured standard Basic provider. */
 import { Context, Service } from '@deepseek-ai/cordis';
-import z from '@deepseek-ai/schemastery';
 import { evaluate, isJsExpr, type EntryOptions } from '@deepseek-ai/cordis-plugin-loader';
 import { composeEntries, readProfilePatches } from '@deepseek-ai/dsh-app-boot';
+import type { Volatile } from '@deepseek-ai/cordis';
+import { ADAPTIVE_MODES, type AdaptiveMode } from './live.js';
 import { entryListProblem, type PresetDefinition } from '@deepseek-ai/dsh-agent-preset-registry';
 
-export interface IntegrationConfig { integration: true }
-export const Config: z<IntegrationConfig> = z.transform(z.object({ integration: z.const(true).required() }), value => {
-  if (Object.keys(value).some(key => key !== 'integration')) throw new TypeError('integration accepts only { integration: true }');
-  return value as IntegrationConfig;
-});
+export interface IntegrationConfig {
+  integration: true;
+  /** Cache-first engine (default) or the native one; live through the settings form. */
+  cacheFirst?: boolean | Volatile<boolean>;
+  /** Adaptive economics mode (default observe); ignored while cacheFirst is false. */
+  adaptiveMode?: AdaptiveMode | Volatile<AdaptiveMode>;
+}
+const INTEGRATION_KEYS = ['integration', 'cacheFirst', 'adaptiveMode'];
+/** Validate the raw marker row exactly as written in the profile patch. */
+export function assertIntegrationRow(config: unknown): void {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) throw new TypeError('integration marker requires { integration: true }');
+  const row = config as Record<string, unknown>;
+  if (row['integration'] !== true) throw new TypeError('integration marker requires { integration: true }');
+  if (Object.keys(row).some(key => !INTEGRATION_KEYS.includes(key))) throw new TypeError('integration accepts only integration, cacheFirst and adaptiveMode');
+  if (row['cacheFirst'] !== undefined && typeof row['cacheFirst'] !== 'boolean') throw new TypeError('cacheFirst must be a boolean');
+  if (row['adaptiveMode'] !== undefined && !ADAPTIVE_MODES.includes(row['adaptiveMode'] as AdaptiveMode)) throw new TypeError('adaptiveMode must be off, observe or active');
+}
+
+/** Startup values of the two switches, read from the raw marker row. */
+export function integrationStartup(rows: readonly EntryOptions[]): { cacheFirst: boolean; mode: AdaptiveMode } {
+  const raw = (rows.find(row => row.id === 'smart-compaction-integration')?.config ?? {}) as Record<string, unknown>;
+  const cacheFirst = raw['cacheFirst'] !== false;
+  const mode = ADAPTIVE_MODES.includes(raw['adaptiveMode'] as AdaptiveMode) ? raw['adaptiveMode'] as AdaptiveMode : 'observe';
+  return { cacheFirst, mode: cacheFirst ? mode : 'off' };
+}
 
 /** Copy only ancestors of the replaced provider; all other fields/expressions survive. */
-export function transformStandard(definition: PresetDefinition): PresetDefinition {
+export function transformStandard(definition: PresetDefinition, startup: { cacheFirst: boolean; mode: AdaptiveMode } = { cacheFirst: true, mode: 'observe' }): PresetDefinition {
   const problem = entryListProblem(definition.plugins);
   if (problem) throw new Error(`smart-compaction: invalid standard preset: ${problem}`);
   let count = 0;
@@ -21,7 +42,7 @@ export function transformStandard(definition: PresetDefinition): PresetDefinitio
     if (row.name !== '@deepseek-ai/dsh-compaction-basic') return row;
     count++;
     return { ...row, name: 'dsh-smart-compaction', config: {
-      cacheFirst: true, adaptive: { mode: 'observe' },
+      cacheFirst: startup.cacheFirst, adaptive: { mode: startup.mode },
       ...(row.config === undefined ? {} : { base: row.config }),
     } };
   });
@@ -47,7 +68,7 @@ export function integrationEnabled(rows: readonly EntryOptions[], ctx: object): 
   if (matches.length !== 1 || !marker || marker.name !== 'dsh-smart-compaction' || marker.group) {
     throw new Error('smart-compaction: expected exactly one root integration marker');
   }
-  Config(marker.config);
+  assertIntegrationRow(marker.config);
   const disabled: unknown = marker.disabled;
   if (isJsExpr(disabled)) {
     if (typeof disabled.__jsExpr !== 'string') throw new Error('smart-compaction: invalid integration disabled expression');
@@ -67,7 +88,7 @@ export function configuredStandard(rows: readonly EntryOptions[], enabled = true
   if (row.disabled !== true) throw new Error('smart-compaction: preset-standard must remain disabled by the bundle; refusing duplicate standard registration');
   const problem = entryListProblem(row.config.plugins);
   if (problem) throw new Error(`smart-compaction: invalid standard preset: ${problem}`);
-  return enabled ? transformStandard(row.config) : row.config;
+  return enabled ? transformStandard(row.config, integrationStartup(rows)) : row.config;
 }
 
 /** Native Service.init yield owns disposal without blocking its own registration scope. */

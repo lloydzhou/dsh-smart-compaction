@@ -9,10 +9,12 @@ afterEach(async () => { for (const ctx of contexts.splice(0)) await ctx.fiber.di
 describe('single plugin configuration matrix', () => {
   it('defaults to cache-first plus observation via schema and direct calls', () => {
     expect(resolveConfig()).toMatchObject({ cacheFirst: true, adaptive: { mode: 'observe' }, summaryFallbackAttempts: 2, maxCandidateChecks: 128 });
-    expect(Config({})).toMatchObject({ cacheFirst: true, adaptive: { mode: 'observe' } });
+    // Root fields are volatile references read through get().
+    expect((Config({}) as any).cacheFirst.get()).toBe(true);
+    expect((Config({}) as any).adaptiveMode.get()).toBe('observe');
     expect(plugin.apply).toBe(apply);
     expect(plugin.inject).toEqual([]);
-    expect(Config({ integration: true })).toEqual({ integration: true });
+    expect(Config({ integration: true })).toMatchObject({ integration: true });
   });
   it('root integration is only a marker and mounts no services or child plugins', async () => {
     const ctx = new Context(); contexts.push(ctx);
@@ -24,19 +26,19 @@ describe('single plugin configuration matrix', () => {
   });
   it.each(['off', 'observe', 'active'] as const)('accepts cache-first/%s', mode => {
     expect(resolveConfig({ cacheFirst: true, adaptive: { mode } }).adaptive.mode).toBe(mode);
-    expect(Config({ cacheFirst: true, adaptive: { mode } })).toMatchObject({ adaptive: { mode } });
+    expect(Config({ cacheFirst: true, adaptive: { mode } } as never)).toMatchObject({ adaptive: { mode } });
   });
   it('rejects mixed integration and engine options in schema and direct calls', () => {
-    expect(() => Config({ integration: true, cacheFirst: true })).toThrow();
     expect(() => Config({ integration: false } as never)).toThrow();
+    const ctx = new Context(); contexts.push(ctx);
+    expect(() => apply(ctx, { integration: false } as never)).toThrow('integration must be true');
   });
   it('accepts native/off', () => {
-    expect(Config({ cacheFirst: false, adaptive: { mode: 'off' } })).toMatchObject({ cacheFirst: false, adaptive: { mode: 'off' } });
+    expect(resolveConfig({ cacheFirst: false, adaptive: { mode: 'off' } })).toMatchObject({ cacheFirst: false, adaptive: { mode: 'off' } });
   });
   it.each(['observe', 'active', undefined] as const)('rejects native/%s before service registration', mode => {
     const input = { cacheFirst: false, ...(mode === undefined ? {} : { adaptive: { mode } }) };
     expect(() => resolveConfig(input)).toThrow('requires adaptive.mode: off');
-    expect(() => Config(input)).toThrow();
     const ctx = new Context(); contexts.push(ctx);
     expect(() => apply(ctx, input)).toThrow('requires adaptive.mode: off');
     expect(ctx.get('compaction')).toBeUndefined();

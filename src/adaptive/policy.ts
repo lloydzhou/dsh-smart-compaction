@@ -51,17 +51,19 @@ export interface PolicyObservation {
   executorOwnsSafety: true;
 }
 /** Numeric-only waterfall middleware: never installs a service or lifecycle driver. */
-export function apply(ctx: Context, input: AdaptiveConfig = {}): void {
+export function apply(ctx: Context, input: AdaptiveConfig = {}, modeOf?: () => 'off' | 'observe' | 'active'): void {
   const config = resolveConfig(input);
   const logger = ctx.logger(name);
   ctx.on('cache-first/decide', (snapshot, next): CacheFirstDecisionResult => {
     const previous = next();
-    if (config.mode === 'off') return previous;
-    const evaluation = evaluatePolicy(snapshot, config);
+    // A live source (the integration entry's switch) wins over the startup value.
+    const mode = modeOf ? modeOf() : config.mode;
+    if (mode === 'off') return previous;
+    const evaluation = evaluatePolicy(snapshot, { ...config, mode });
     const usable = ['compact', 'defer', 'below-pressure', 'no-candidate'].includes(evaluation.status);
-    const applied = config.mode === 'active' && usable;
+    const applied = mode === 'active' && usable;
     const observation: PolicyObservation = {
-      event: 'adaptive-compaction/decision', mode: config.mode,
+      event: 'adaptive-compaction/decision', mode,
       ...(snapshot.sessionId === undefined ? {} : { sessionId: snapshot.sessionId }),
       ...(snapshot.operationId === undefined ? {} : { operationId: snapshot.operationId }),
       route: snapshot.route, summaryRoute: snapshot.summaryRoute, trigger: snapshot.trigger,

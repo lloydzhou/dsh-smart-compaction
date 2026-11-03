@@ -59,7 +59,7 @@ describe('public client renderer', () => {
       throw new Error(`Unexpected bundled import: ${id}`);
     } });
     runInContext(output, context);
-    expect(imports.sort()).toEqual(['@deepseek-ai/dsh-client-ui-primitives', 'react']);
+    expect([...new Set(imports)].sort()).toEqual(['@deepseek-ai/dsh-client-ui-primitives', 'react']);
     const props = { node: { data: { seq: 50, summary: 'UNCHANGED STOCK SUMMARY', summaryEventSeq: 42, shadowedItemCount: 4, shadowedTokenCount: 1200 } },
       sessionId: 'session-1', useProjection: (key: string) => { expect(key).toBe('smartCompaction'); return undefined; } };
     const fallback = JSON.stringify(module.exports.CompactionRenderer!(props));
@@ -118,7 +118,7 @@ function manualHarness(expanded = true) {
     throw Error(`Private import: ${id}`);
   } });
   runInContext(output, context);
-  module.exports.apply({ effect: () => {}, slots: { inject: (_: string, fn: any) => { for (const _dispose of fn()) { /* collect registration effects */ } }, register: (options: any) => { registrations.push(options.key); return () => {}; } } });
+  module.exports.apply({ effect: () => {}, configForms: { get: () => ({ set: async () => true }), whileServed: () => () => {} }, slots: { inject: (_: string, fn: any) => { for (const _dispose of fn()) { /* collect registration effects */ } }, register: (options: any) => { registrations.push(options.key); return () => {}; } } });
   return { registrations, render(node: unknown, payload: unknown = projection(), sessionId = 'session-1', chinese = false) {
     context.input = JSON.stringify({ node, sessionId }); context.payload = JSON.stringify(payload); context.dictionary = chinese ? zh : en;
     const result = runInContext(`(()=>{const p=JSON.parse(input);p.useProjection=()=>JSON.parse(payload);p.t=(key,values)=> (dictionary[key]??key).replace(/\\{(\\w+)\\}/g,(m,k)=>String(values?.[k]??m));return module.exports.ManualCompactionRenderer(p)})()`, context);

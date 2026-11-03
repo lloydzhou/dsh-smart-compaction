@@ -1,6 +1,6 @@
 {
   "name": "dsh-smart-compaction",
-  "version": "0.2.1-rc.2",
+  "version": "0.2.1-rc.3",
   "description": "Cache-first compaction with optional adaptive economics for DeepSeek Harness",
   "type": "module",
   "license": "MIT",
@@ -59,7 +59,9 @@
         "@deepseek-ai/dsh-client-ui-session",
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-slots",
-        "@deepseek-ai/dsh-client-ui-primitives"
+        "@deepseek-ai/dsh-client-ui-primitives",
+        "@deepseek-ai/dsh-client-ui-plugin-manager",
+        "@deepseek-ai/dsh-client-ui-settings"
       ]
     }
   },

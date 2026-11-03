@@ -6,6 +6,7 @@ import { collapsedFacts, diagnosticRows, matchDiagnostic, nativeSummaryLabel, PR
 import { defaultT, en, zh, NAMESPACE } from './locales.js';
 
 import { styles } from './styles.js';
+import { SettingsCard, SETTINGS_NAMESPACE, SETTINGS_PACKAGE } from './settings.js';
 
 const h = React.createElement;
 function leadingIcons(open: boolean, expandable = true) {
@@ -81,13 +82,19 @@ function ManualCommandStatus({ command, t }: { command: ManualCompactionProps['n
     open && h('pre', { id: bodyId, className: 'dsh-smart-compaction-body', 'data-error': state === 'error' || undefined }, body));
 }
 
-export const inject = ['slots', 'locale'];
+export const inject = ['slots', 'locale', 'configForms'];
 /** Minimal public host capability shape keeps the client independent of runtime
  * implementation imports. The published ChatNodeViewProps remains authoritative. */
 export interface ClientContext {
   effect(effect: () => void | (() => void), label?: string): unknown;
   locale: { register(namespace: string, locales: { en: typeof en; zh: typeof zh }): (() => void) };
+  configForms: {
+    get(namespace: string): { set(field: string, value: unknown): Promise<boolean> };
+    whileServed(namespaces: string[], fn: () => unknown): unknown;
+  };
   slots: {
+    inject(name: 'plugins.bundle.config', effect: () => unknown): unknown;
+    register(options: { name: 'plugins.bundle.config'; key: string; locale: string; inject: () => unknown }, component: typeof SettingsCard): () => void;
     inject(name: 'conversation.chat.node', effect: () => unknown): unknown;
     register(options: { name: 'conversation.chat.node'; key: 'compaction'; locale: string; priority: number }, component: typeof CompactionRenderer): () => void;
     register(options: { name: 'conversation.chat.node'; key: 'manual-compaction'; locale: string; priority: number }, component: typeof ManualCompactionRenderer): () => void;
@@ -95,6 +102,12 @@ export interface ClientContext {
 }
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NAMESPACE, { en, zh }), 'smart-compaction: dictionaries');
+  // Detail-page form: two switches written live to the profile patch.
+  const form = ctx.configForms.get(SETTINGS_NAMESPACE);
+  ctx.effect(() => ctx.configForms.whileServed([SETTINGS_NAMESPACE], () => ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
+    name: 'plugins.bundle.config', key: SETTINGS_PACKAGE, locale: NAMESPACE,
+    inject: () => ({ hooks: { config: form }, setField: (field: string, value: boolean | string) => { void form.set(field, value); } }),
+  }, SettingsCard))) as () => void, 'smart-compaction: settings page');
   ctx.effect(() => {
     const style = document.createElement('style');
     style.dataset.plugin = 'dsh-smart-compaction';

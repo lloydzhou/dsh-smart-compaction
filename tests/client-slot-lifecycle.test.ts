@@ -68,6 +68,8 @@ function pluginHarness(core: SlotCore, client: ReturnType<typeof loadClient>) {
     const facade = {
       effect: ctx.effect.bind(ctx),
       locale: { register: localeRegister },
+      // Settings form: served immediately; its slot is undeclared here, so it registers nothing.
+      configForms: { get: () => ({ set: async () => true }), whileServed: (_ns: string[], fn: () => unknown) => fn() },
       slots: {
         register: (options: object, component: unknown) => ctx.effect(() => register(core, options, component), 'slots.register()'),
         inject: (name: string, callback: () => any) => {

@@ -34,6 +34,15 @@ npm publish --tag next --access public
 
 构建建议使用仓库的 npm lock 配合 `npm ci`，避免交替使用包管理器。pnpm 安装也可构建：Zod 固定为宿主投影接口使用的 `4.4.3`，导出的 Schemastery 配置显式声明输入/输出类型。曾因 pnpm 将根 Zod 升为4.6.7、宿主仍用4.4.3，引发递归类型比较耗尽约4GB堆；已修复版本不一致及声明可移植性，不需要提高内存或设置 `preserveSymlinks`。
 
+## 设置表单
+
+插件详情页（插件 → 智能压缩）提供两个即时写入当前 profile 的设置，对应根条目 `smart-compaction-integration` 的 volatile 字段：
+
+- **缓存优先压缩** `cacheFirst`（默认开）：关闭则改用原生引擎，同时自适应策略失效。切换时引擎会被替换，在下一次压缩生效。
+- **自适应经济策略** `adaptiveMode`：`off` / `observe`（默认）/ `active`。策略按每次决策读取，无需重启。
+
+表单要求 profile 中根条目 id 为 `smart-compaction-integration`。根条目启用前的冷启动值来自同一份 patch。
+
 ## 如何确认插件正在工作
 
 1. 插件页面显示 `agent-preset / Running` 只表示 preset 声明已注册，不证明当前会话使用了该引擎。
