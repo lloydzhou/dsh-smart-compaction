@@ -84,7 +84,7 @@ export function resolveConfig(input: AdaptiveConfig = {}): ResolvedConfig {
 const rate = () => z.number().min(0).required();
 const ratio = (value: number) => z.number().min(0).max(1).default(value);
 /** Loader/UI schema plus the same strict runtime checks as direct installation. */
-export const Config = z.transform(z.object({
+export const Config: z<AdaptiveConfig, ResolvedConfig> = z.transform(z.object({
   mode: z.union(['off', 'observe', 'active']).default('observe'),
   referencePriceFallback: z.boolean().default(true),
   legacyPriceCurrency: z.string().default('unspecified'),

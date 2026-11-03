@@ -33,7 +33,7 @@ describe('standard integration bundle', () => {
     expect(manifest.private).toBeUndefined();
     expect(manifest.workspaces).toBeUndefined();
     const supported = '^0.2.1-rc.3';
-    expect(manifest.version).toBe('0.2.1-rc.1');
+    expect(manifest.version).toBe('0.2.1-rc.2');
     expect(manifest.engines.dsh).toBe('>=0.2.1-rc.3');
     for (const section of ['dependencies', 'devDependencies']) {
       for (const [name, range] of Object.entries(manifest[section])) {

@@ -32,6 +32,8 @@ npm publish --tag next --access public
 
 预发布版本使用 `next`，不要无意更新 `latest`。`prepack` 会构建后端和客户端；发布产物包含 `lib`、`client/dist`、bundle patch 与说明文档，不包含本地协作笔记或认证文件。若同版本已发布，先递增版本，npm 不允许覆盖版本。
 
+构建建议使用仓库的 npm lock 配合 `npm ci`，避免交替使用包管理器。pnpm 安装也可构建：Zod 固定为宿主投影接口使用的 `4.4.3`，导出的 Schemastery 配置显式声明输入/输出类型。曾因 pnpm 将根 Zod 升为4.6.7、宿主仍用4.4.3，引发递归类型比较耗尽约4GB堆；已修复版本不一致及声明可移植性，不需要提高内存或设置 `preserveSymlinks`。
+
 ## 如何确认插件正在工作
 
 1. 插件页面显示 `agent-preset / Running` 只表示 preset 声明已注册，不证明当前会话使用了该引擎。

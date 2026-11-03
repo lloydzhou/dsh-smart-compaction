@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Smart compaction",
+    "description": "Cache-first context compaction with optional adaptive economics for DeepSeek Harness"
+  }
+}
