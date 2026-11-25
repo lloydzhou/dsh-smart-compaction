@@ -1,6 +1,6 @@
 {
   "name": "dsh-smart-compaction",
-  "version": "0.2.1-rc.3",
+  "version": "0.2.1-rc.4",
   "description": "Cache-first compaction with optional adaptive economics for DeepSeek Harness",
   "type": "module",
   "license": "MIT",
@@ -27,6 +27,7 @@
       "types": "./lib/policy.d.ts",
       "import": "./lib/policy.js"
     },
+    "./icon": "./icon.svg",
     "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json",
     "./client": "./client/dist/client.js",
@@ -41,6 +42,7 @@
     "README.md",
     "docs",
     "cordis.patch.yml",
+    "icon.svg",
     "THIRD_PARTY_NOTICES.md",
     "client/dist"
   ],
